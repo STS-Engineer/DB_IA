@@ -1,0 +1,54 @@
+openapi: 3.0.1
+info:
+  title: Action Plan API
+  description: Store GPT-generated action plans into PostgreSQL.
+  version: "1.0.0"
+servers:
+  - url: https://yourdomain.com # ⬅️ Replace this with your deployed API base URL
+paths:
+  /action-plan:
+    post:
+      operationId: storeActionPlan
+      summary: Store a GPT-generated action plan
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionPlan"
+      responses:
+        "200":
+          description: Successfully stored the action plan
+components:
+  schemas:
+    ActionStep:
+      type: object
+      required:
+        - description
+        - due_date
+      properties:
+        description:
+          type: string
+        due_date:
+          type: string
+          format: date
+
+    ActionPlan:
+      type: object
+      required:
+        - title
+        - owner
+        - deadline
+        - steps
+      properties:
+        title:
+          type: string
+        owner:
+          type: string
+        deadline:
+          type: string
+          format: date
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActionStep"
