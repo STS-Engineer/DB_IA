@@ -1,4 +1,4 @@
-name: Build and Deploy FastAPI App to Azure Web App - db-ia
+name: Build and Deploy Python FastAPI App to Azure Web App - db-ia
 
 on:
   push:
@@ -11,25 +11,24 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: 🧾 Checkout code
+      - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: 🐍 Set up Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.11'  # Use stable version (3.13 support is new)
 
-      - name: 📦 Install dependencies (local, optional)
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+      - name: Log in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_C18824930A704513AD9924FAE56A632E }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_5B4491B805994D60880E0455CC42B957 }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_22123F59671B40F0BAD43341F86015EB }}
 
-      # No need to zip manually; Azure handles it
-
-      - name: 🚀 Deploy to Azure Web App using publish profile
+      - name: Deploy to Azure Web App
         uses: azure/webapps-deploy@v3
         with:
-          app-name: 'db-ia'  # Replace with your actual App Service name
+          app-name: 'db-ia'
           slot-name: 'Production'
-          publish-profile: ${{ secrets.AZUREAPPSERVICE_PUBLISHPROFILE }}
           package: .
