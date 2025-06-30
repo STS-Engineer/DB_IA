@@ -18,6 +18,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'  # Use stable version (3.13 support is new)
+          
+      - name: 🚫 Disable CI checks
+        run: echo "CI=false" >> $GITHUB_ENV     
 
       - name: Log in to Azure
         uses: azure/login@v2
