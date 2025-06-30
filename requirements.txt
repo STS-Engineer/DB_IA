@@ -1,6 +1,6 @@
 fastapi
+uvicorn[standard]
 gunicorn
-uvicorn
 psycopg2-binary
 pydantic
 
