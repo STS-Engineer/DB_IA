@@ -22,8 +22,13 @@ jobs:
           python-version: '3.11'  # Use stable version (3.13 support is new)
           
       - name: 🚫 Disable CI checks
-        run: echo "CI=false" >> $GITHUB_ENV     
+        run: echo "CI=false" >> $GITHUB_ENV
 
+      - name: 📦 Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+    
       - name: Log in to Azure
         uses: azure/login@v2
         with:
