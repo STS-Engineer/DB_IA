@@ -3,5 +3,5 @@ uvicorn==0.29.0
 hypercorn==0.16.0
 daphne==4.1.0
 requests==2.31.0
-pydantic==2.7.3
+
 
