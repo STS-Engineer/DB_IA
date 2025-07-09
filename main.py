@@ -6,7 +6,6 @@ from db import get_connection
 import base64
 
 app = FastAPI()
-
 # ----------------------
 # 1. Route : Création plan d'action
 # ----------------------
