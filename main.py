@@ -163,3 +163,37 @@ def download_file(action_plan_id: int):
         if conn:
             conn.close()
         raise HTTPException(status_code=500, detail=f"Téléchargement échoué : {str(e)}")
+# ----------------------
+# 5. 🧪 Debug: Get base64-encoded content from DB
+# ----------------------
+
+@app.get("/debug-file/{file_id}")
+def debug_file_base64(file_id: int):
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT filename, filetype, encode(content, 'base64')
+            FROM action_files
+            WHERE id = %s
+        """, (file_id,))
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Fichier non trouvé")
+
+        filename, filetype, encoded_content = row
+        return {
+            "filename": filename,
+            "filetype": filetype,
+            "base64_content": encoded_content
+        }
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Erreur debug : {str(e)}")
