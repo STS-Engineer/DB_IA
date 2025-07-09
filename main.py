@@ -1,14 +1,14 @@
-from fastapi import FastAPI, HTTPException, File, Form , UploadFile, Header
+from fastapi import FastAPI, HTTPException, File, Form, UploadFile
 from models import ActionPlan
 from datetime import datetime
 from db import get_connection
-import shutil
-
 
 app = FastAPI()
 
+
 @app.post("/action-plan")
 def store_action_plan(plan: ActionPlan):
+    conn = None
     try:
         conn = get_connection()
         cur = conn.cursor()
@@ -29,19 +29,24 @@ def store_action_plan(plan: ActionPlan):
             """, (plan_id, step.description, step.due_date))
 
         conn.commit()
-        cur.close()
-        conn.close()
         return {"status": "success", "action_plan_id": plan_id}
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to store action plan: {str(e)}")
+
+    finally:
+        if conn:
+            conn.close()
+
 
 @app.post("/upload-action-file")
 async def upload_action_file(
     action_plan_id: int = Form(...),
-    file: UploadFile = File(...),
-    x_chatgpt_token: str = Header(None)
+    file: UploadFile = File(...)
 ):
-    if x_chatgpt_token != ALLOWED_ASSISTANT_TOKEN:
-        raise HTTPException(status_code=403, detail="Unauthorized sender")
-
+    conn = None
     try:
         file_data = await file.read()
 
@@ -60,11 +65,13 @@ async def upload_action_file(
         ))
 
         conn.commit()
-        cur.close()
-        conn.close()
-
         return {"status": "file stored", "filename": file.filename}
 
-
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        if conn:
+            conn.rollback()
+        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+
+    finally:
+        if conn:
+            conn.close()
