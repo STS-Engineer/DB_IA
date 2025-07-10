@@ -132,8 +132,8 @@ def upload_generated_file(data: FileUploadPayload):
 # 4. Téléchargement d'un fichier enregistré (depuis la DB)
 # ----------------------
 
-@app.get("/download-file/{action_plan_id}")
-def download_file(action_plan_id: int):
+@app.get("/download-file-by-id/{file_id}")
+def download_file_by_id(file_id: int):
     conn = None
     try:
         conn = get_connection()
@@ -142,9 +142,8 @@ def download_file(action_plan_id: int):
         cur.execute("""
             SELECT filename, filetype, content
             FROM action_files
-            WHERE action_plan_id = %s
-            LIMIT 1
-        """, (action_plan_id,))
+            WHERE id = %s
+        """, (file_id,))
         row = cur.fetchone()
         cur.close()
         conn.close()
