@@ -7,6 +7,8 @@ from fastapi.responses import StreamingResponse
 import base64
 import io
 import mimetypes
+import json
+import requests
 
 app = FastAPI()
 
@@ -179,7 +181,7 @@ def download_file_by_id(file_id: int):
 
 
 # ----------------------
-# 5. 🧪 Debug: Get base64-encoded content from DB and detect type
+# 5. 🧺 Debug: Get base64-encoded content from DB and detect type
 # ----------------------
 
 @app.get("/debug-file/{file_id}")
@@ -217,3 +219,59 @@ def debug_file_base64(file_id: int):
         if conn:
             conn.close()
         raise HTTPException(status_code=500, detail=f"Erreur debug : {str(e)}")
+
+
+# ----------------------
+# 6. ✨ Upload file to Monday.com file column
+# ----------------------
+
+@app.post("/upload-file-to-monday")
+async def upload_file_to_monday(
+    monday_token: str = Form(...),
+    item_id: int = Form(...),
+    column_id: str = Form(...),
+    file: UploadFile = File(...)
+):
+    try:
+        file_bytes = await file.read()
+
+        query = """
+        mutation ($file: File!, $itemId: Int!, $columnId: String!) {
+          add_file_to_column (file: $file, item_id: $itemId, column_id: $columnId) {
+            id
+          }
+        }
+        """
+
+        operations = {
+            "query": query,
+            "variables": {
+                "file": None,
+                "itemId": item_id,
+                "columnId": column_id
+            }
+        }
+
+        files_map = {
+            "0": ["variables.file"]
+        }
+
+        multipart_data = {
+            'operations': (None, json.dumps(operations), 'application/json'),
+            'map': (None, json.dumps(files_map), 'application/json'),
+            '0': (file.filename, file_bytes, file.content_type)
+        }
+
+        response = requests.post(
+            "https://api.monday.com/v2/file",
+            files=multipart_data,
+            headers={"Authorization": monday_token}
+        )
+
+        if response.status_code != 200:
+            raise HTTPException(status_code=500, detail=f"Monday API error: {response.text}")
+
+        return {"status": "uploaded to Monday", "monday_response": response.json()}
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Upload to Monday failed: {str(e)}")
