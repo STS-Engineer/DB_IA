@@ -11,6 +11,16 @@ import mimetypes
 app = FastAPI()
 
 # ----------------------
+# Helper: Safe Base64 decode with padding fix
+# ----------------------
+def safe_b64decode(content: str) -> bytes:
+    content = content.strip().replace("\n", "").replace("\r", "")
+    missing_padding = len(content) % 4
+    if missing_padding:
+        content += "=" * (4 - missing_padding)
+    return base64.b64decode(content)
+
+# ----------------------
 # 1. Route : Création plan d'action
 # ----------------------
 
@@ -101,7 +111,7 @@ class FileUploadPayload(BaseModel):
 def upload_generated_file(data: FileUploadPayload):
     conn = None
     try:
-        file_data = base64.b64decode(data.content)
+        file_data = safe_b64decode(data.content)
 
         if len(file_data) > 10 * 1024 * 1024:
             raise HTTPException(status_code=413, detail="File too large")
