@@ -6,6 +6,7 @@ from db import get_connection
 from fastapi.responses import StreamingResponse
 import base64
 import io
+import mimetypes
 
 app = FastAPI()
 
@@ -102,6 +103,9 @@ def upload_generated_file(data: FileUploadPayload):
     try:
         file_data = base64.b64decode(data.content)
 
+        if len(file_data) > 10 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="File too large")
+
         conn = get_connection()
         cur = conn.cursor()
         cur.execute("""
@@ -154,7 +158,7 @@ def download_file_by_id(file_id: int):
         filename, filetype, content = row
         return StreamingResponse(
             io.BytesIO(content),
-            media_type=filetype,
+            media_type=filetype or "application/octet-stream",
             headers={"Content-Disposition": f"attachment; filename={filename}"}
         )
 
@@ -162,8 +166,10 @@ def download_file_by_id(file_id: int):
         if conn:
             conn.close()
         raise HTTPException(status_code=500, detail=f"Téléchargement échoué : {str(e)}")
+
+
 # ----------------------
-# 5. 🧪 Debug: Get base64-encoded content from DB
+# 5. 🧪 Debug: Get base64-encoded content from DB and detect type
 # ----------------------
 
 @app.get("/debug-file/{file_id}")
@@ -174,7 +180,7 @@ def debug_file_base64(file_id: int):
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT filename, filetype, encode(content, 'base64')
+            SELECT filename, filetype, content
             FROM action_files
             WHERE id = %s
         """, (file_id,))
@@ -185,10 +191,15 @@ def debug_file_base64(file_id: int):
         if not row:
             raise HTTPException(status_code=404, detail="Fichier non trouvé")
 
-        filename, filetype, encoded_content = row
+        filename, filetype, binary_content = row
+        encoded_content = base64.b64encode(binary_content).decode("utf-8")
+
+        guessed_type, _ = mimetypes.guess_type(filename)
+
         return {
             "filename": filename,
-            "filetype": filetype,
+            "stored_mimetype": filetype,
+            "guessed_mimetype": guessed_type,
             "base64_content": encoded_content
         }
 
