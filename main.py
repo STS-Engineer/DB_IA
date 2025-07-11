@@ -179,7 +179,6 @@ def download_file_by_id(file_id: int):
             conn.close()
         raise HTTPException(status_code=500, detail=f"Téléchargement échoué : {str(e)}")
 
-
 # ----------------------
 # 5. 🧺 Debug: Get base64-encoded content from DB and detect type
 # ----------------------
