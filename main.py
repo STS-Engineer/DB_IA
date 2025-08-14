@@ -274,3 +274,67 @@ async def upload_file_to_monday(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload to Monday failed: {str(e)}")
+# ----------------------
+# 7. Auth simple: /auth/check (lecture DB name+code)
+# ----------------------
+
+class AuthCheckIn(BaseModel):
+    name: str
+    code: str
+
+class AuthCheckOut(BaseModel):
+    ok: bool
+    reason: str | None = None  # message générique
+
+@app.post("/auth/check", response_model=AuthCheckOut)
+def auth_check(payload: AuthCheckIn):
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        # On ne révèle pas si le name existe : réponse générique
+        GENERIC_FAIL = {"ok": False, "reason": "Invalid name or code"}
+
+        # Lecture stricte par name
+        cur.execute(
+            """
+            SELECT code, is_active, expires_at
+            FROM access_codes
+            WHERE name = %s
+            LIMIT 1
+            """,
+            (payload.name,)
+        )
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        conn = None
+
+        if not row:
+            return GENERIC_FAIL
+
+        db_code, is_active, expires_at = row
+
+        # Vérifs état / expiration
+        if not is_active:
+            return {"ok": False, "reason": "Access disabled"}
+
+        from datetime import datetime, timezone
+        now = datetime.now(timezone.utc)
+        if expires_at is not None and expires_at <= now:
+            return {"ok": False, "reason": "Code expired"}
+
+        # Comparaison en clair (POC)
+        if payload.code != db_code:
+            return GENERIC_FAIL
+
+        # OK
+        return {"ok": True}
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        # On garde 200 pour simplicité côté GPT, mais on peut aussi lever 500
+        return {"ok": False, "reason": f"Server error"}
+
