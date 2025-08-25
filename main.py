@@ -337,4 +337,153 @@ def auth_check(payload: AuthCheckIn):
             conn.close()
         # On garde 200 pour simplicité côté GPT, mais on peut aussi lever 500
         return {"ok": False, "reason": f"Server error"}
+# ----------------------
+# 8) GET /auditees/check  (auth by first_name + email)
+# ----------------------
+@app.get("/auditees/check", response_model=AuthAuditeeOut)
+def auditee_check(first_name: str, email: EmailStr):
+    """
+    - If an auditee exists for this email (case-insensitive): ok=true and return profile
+    - If not found: ok=false (assistant will ask for missing fields and call POST /auditees)
+    - Also returns 'today' (UTC) so the assistant uses it as the audit date
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT id, first_name, email, "function",
+                   plant_id, plant_name, dept_id, dept_name
+            FROM auditees
+            WHERE lower(email) = lower(%s)
+            LIMIT 1
+        """, (email,))
+        row = cur.fetchone()
+
+        if not row:
+            cur.close(); conn.close()
+            return {"ok": False, "today": today_iso(), "reason": "Not found"}
+
+        (aid, db_first_name, db_email, db_function,
+         plant_id, plant_name, dept_id, dept_name) = row
+
+        # Cheap sync of preferred first_name if different
+        incoming_first = first_name.strip()
+        if incoming_first and incoming_first != db_first_name:
+            cur.execute("""
+                UPDATE auditees
+                SET first_name = %s
+                WHERE id = %s
+            """, (incoming_first, aid))
+            conn.commit()
+            db_first_name = incoming_first
+
+        cur.close(); conn.close()
+
+        return {
+            "ok": True,
+            "today": today_iso(),
+            "auditee": {
+                "id": aid,
+                "first_name": db_first_name,
+                "email": db_email,
+                "function": db_function,
+                "plant_id": plant_id,
+                "plant_name": plant_name,
+                "dept_id": dept_id,
+                "dept_name": dept_name
+            }
+        }
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        # keep 200 with reason so your assistant handles uniformly
+        return {"ok": False, "today": today_iso(), "reason": f"Server error: {e}"}
+
+
+# ----------------------
+# 9) POST /auditees  (create or update full profile)
+# ----------------------
+@app.post("/auditees", response_model=AuditeeCreateOut, status_code=200)
+def create_or_update_auditee(payload: AuditeeCreateIn):
+    """
+    Upsert rule:
+      - If email exists -> update provided fields
+      - If not -> insert new row
+    Returns the full profile + today's date for the audit.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        # Exists?
+        cur.execute("""
+            SELECT id FROM auditees
+            WHERE lower(email) = lower(%s)
+            LIMIT 1
+        """, (payload.email,))
+        hit = cur.fetchone()
+
+        if hit:
+            aid = hit[0]
+            cur.execute("""
+                UPDATE auditees
+                SET first_name = COALESCE(%s, first_name),
+                    "function" = COALESCE(%s, "function"),
+                    plant_id = COALESCE(%s, plant_id),
+                    plant_name = COALESCE(%s, plant_name),
+                    dept_id = COALESCE(%s, dept_id),
+                    dept_name = COALESCE(%s, dept_name)
+                WHERE id = %s
+                RETURNING id, first_name, email, "function",
+                          plant_id, plant_name, dept_id, dept_name
+            """, (
+                payload.first_name.strip(),
+                (payload.function.strip() if payload.function else None),
+                payload.plant_id, payload.plant_name,
+                payload.dept_id, payload.dept_name,
+                aid
+            ))
+            row = cur.fetchone()
+        else:
+            cur.execute("""
+                INSERT INTO auditees (first_name, email, "function",
+                                      plant_id, plant_name, dept_id, dept_name)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING id, first_name, email, "function",
+                          plant_id, plant_name, dept_id, dept_name
+            """, (
+                payload.first_name.strip(),
+                payload.email.strip(),
+                (payload.function.strip() if payload.function else None),
+                payload.plant_id, payload.plant_name,
+                payload.dept_id, payload.dept_name
+            ))
+            row = cur.fetchone()
+
+        conn.commit()
+        cur.close(); conn.close()
+
+        (aid, first_name, email, function,
+         plant_id, plant_name, dept_id, dept_name) = row
+
+        return {
+            "ok": True,
+            "today": today_iso(),
+            "auditee": {
+                "id": aid, "first_name": first_name, "email": email,
+                "function": function,
+                "plant_id": plant_id, "plant_name": plant_name,
+                "dept_id": dept_id, "dept_name": dept_name
+            }
+        }
+
+    except Exception as e:
+        if conn:
+            conn.rollback()
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to upsert auditee: {e}")
 
