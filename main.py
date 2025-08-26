@@ -1,6 +1,12 @@
 from fastapi import FastAPI, HTTPException, File, Form, UploadFile
-from pydantic import BaseModel
-from models import ActionPlan
+from pydantic import BaseModel, EmailStr             
+from models import (                                 
+    ActionPlan,
+    AuditeeCreateIn,
+    AuditeeCreateOut,
+    AuthAuditeeOut,
+    today_iso,
+)
 from datetime import datetime
 from db import get_connection
 from fastapi.responses import StreamingResponse
