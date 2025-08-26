@@ -1,5 +1,5 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import List
+from typing import List , Optional
 
 class ActionStep(BaseModel):
     description: str
