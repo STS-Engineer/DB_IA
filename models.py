@@ -1,5 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field
 from typing import List , Optional
+from datetime import datetime, timezone  
 
 class ActionStep(BaseModel):
     description: str
@@ -45,6 +46,5 @@ class AuditeeCreateOut(BaseModel):
     auditee: AuditeeOut
 
 def today_iso():
-    from datetime import timezone
     return datetime.now(timezone.utc).date().isoformat()
 
