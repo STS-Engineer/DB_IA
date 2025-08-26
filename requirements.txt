@@ -1,10 +1,10 @@
-fastapi==0.111.0
-uvicorn==0.29.0
-hypercorn==0.16.0
-daphne==4.1.0
-requests==2.31.0
-psycopg2-binary==2.9.9
-fpdf==1.7.2     
+fastapi
+uvicorn
+hypercorn
+daphne
+requests
+psycopg2-binary
+fpdf   
 email-validator          
 python-multipart   
 
