@@ -1,4 +1,5 @@
-from fastapi import FastAPI, HTTPException, File, Form, UploadFile
+from fastapi import FastAPI, HTTPException, File, Form, UploadFile , Request , Response
+import httpx
 from pydantic import BaseModel, EmailStr             
 from models import (                                 
     ActionPlan,
@@ -17,7 +18,7 @@ import json
 import requests
 
 app = FastAPI()
-
+MAKE_URL = "https://hook.eu2.make.com/wpmelz03ny8l3wgjkmt4dy0nadqcaib1"
 # ----------------------
 # Helper: Safe Base64 decode with padding fix
 # ----------------------
@@ -492,4 +493,13 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
             conn.rollback()
             conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to upsert auditee: {e}")
+
+@app.post("/questionnaires/fetch")
+async def questionnaires_fetch(req: Request):
+    payload = await req.json()
+    async with httpx.AsyncClient(timeout=30) as client:
+        r = await client.post(MAKE_URL, json=payload)
+    # Relay content-type (JSON vs DOCX) transparently
+    content_type = r.headers.get("content-type", "application/json")
+    return Response(content=r.content, status_code=r.status_code, headers={"Content-Type": content_type})
 
