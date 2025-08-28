@@ -1,5 +1,4 @@
-from fastapi import FastAPI, HTTPException, File, Form, UploadFile , Request , Response
-import httpx
+from fastapi import FastAPI, HTTPException, File, Form, UploadFile
 from pydantic import BaseModel, EmailStr             
 from models import (                                 
     ActionPlan,
