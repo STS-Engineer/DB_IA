@@ -492,3 +492,6 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
             conn.rollback()
             conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to upsert auditee: {e}")
+
+
+
