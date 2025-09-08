@@ -1,5 +1,5 @@
 from fastapi import FastAPI, HTTPException, File, Form, UploadFile
-from pydantic import BaseModel, EmailStr             
+from pydantic import BaseModel, EmailStr , Field            
 from models import (                                 
     ActionPlan,
     AuditeeCreateIn,
@@ -7,7 +7,7 @@ from models import (
     AuthAuditeeOut,
     today_iso,
 )
-from datetime import datetime
+from datetime import datetime , date
 from db import get_connection
 from fastapi.responses import StreamingResponse
 import base64
@@ -493,5 +493,206 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
             conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to upsert auditee: {e}")
 
+@app.post("/audits/start")
+def audit_start(payload: AuditStartIn):
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
 
+        cur.execute("""
+            INSERT INTO audits (auditee_id, type, questionnaire_version, external_id, status, started_at)
+            VALUES (%s, %s, %s, %s, 'in_progress', now())
+            RETURNING id, auditee_id, type, status, started_at, questionnaire_version, score_global
+        """, (
+            payload.auditee_id, payload.type, payload.questionnaire_version, payload.external_id
+        ))
+
+        row = cur.fetchone()
+        conn.commit()
+        cur.close(); conn.close(); conn = None
+
+        (aid, auditee_id, atype, status, started_at, qv, score) = row
+        return {
+            "id": aid,
+            "auditee_id": auditee_id,
+            "type": atype,
+            "status": status,
+            "started_at": started_at,
+            "questionnaire_version": qv,
+            "score_global": float(score) if score is not None else None
+        }
+
+    except Exception as e:
+        if conn:
+            conn.rollback(); conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to start audit: {e}")
+
+@app.post("/questions/bulk")
+def questions_bulk_upsert(payload: QuestionsBulkIn):
+    """
+    For each question in order, if (version_tag, text) exists => return existing question_id,
+    else insert and return the new question_id. Response order matches input order.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        out_items = []
+
+        for idx, q in enumerate(payload.questions):
+            # 1) try to find existing
+            cur.execute("""
+                SELECT question_id FROM questions
+                 WHERE version_tag = %s AND text = %s
+                 LIMIT 1
+            """, (payload.version_tag, q.text))
+            hit = cur.fetchone()
+
+            if hit:
+                qid = hit[0]
+            else:
+                # 2) insert
+                cur.execute("""
+                    INSERT INTO questions (text, category, mandatory, source_doc, version_tag, created_at)
+                    VALUES (%s, %s, %s, %s, %s, now())
+                    RETURNING question_id
+                """, (q.text, q.category, q.mandatory, q.source_doc, payload.version_tag))
+                qid = cur.fetchone()[0]
+
+            out_items.append({"index": idx, "question_id": qid})
+
+        conn.commit()
+        cur.close(); conn.close(); conn = None
+        return {"ok": True, "version_tag": payload.version_tag, "items": out_items}
+
+    except Exception as e:
+        if conn:
+            conn.rollback(); conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to upsert questions: {e}")
+
+@app.post("/audits/{audit_id}/answers")
+def save_answer(audit_id: int, payload: AnswerIn):
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        # try update (unique key: audit_id, question_id, attempt_number)
+        cur.execute("""
+            UPDATE answers
+               SET response_text = %s,
+                   is_compliant  = %s,
+                   evidence_url  = %s
+             WHERE audit_id = %s AND question_id = %s AND attempt_number = %s
+         RETURNING answer_id
+        """, (
+            payload.response_text, payload.is_compliant, payload.evidence_url,
+            audit_id, payload.question_id, payload.attempt_number
+        ))
+        row = cur.fetchone()
+
+        if not row:
+            cur.execute("""
+                INSERT INTO answers (audit_id, question_id, response_text, is_compliant, attempt_number, evidence_url, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, now())
+                RETURNING answer_id
+            """, (
+                audit_id, payload.question_id, payload.response_text,
+                payload.is_compliant, payload.attempt_number, payload.evidence_url
+            ))
+            row = cur.fetchone()
+
+        conn.commit()
+        answer_id = row[0]
+        cur.close(); conn.close(); conn = None
+        return {"ok": True, "answer_id": answer_id}
+
+    except Exception as e:
+        if conn:
+            conn.rollback(); conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to save answer: {e}")
+
+@app.post("/audits/{audit_id}/nonconformities")
+def save_nc(audit_id: int, payload: NonConformityIn):
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            INSERT INTO non_conformities (
+                audit_id, question_id, description, severity, status,
+                responsible_id, due_date, evidence_url, closed_at, closure_comment, detected_at
+            )
+            VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s, now())
+            RETURNING nc_id
+        """, (
+            audit_id, payload.question_id, payload.description, payload.severity, payload.status,
+            payload.responsible_id, payload.due_date, payload.evidence_url, payload.closed_at, payload.closure_comment
+        ))
+        nc_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close(); conn.close(); conn = None
+        return {"ok": True, "nc_id": nc_id}
+
+    except Exception as e:
+        if conn:
+            conn.rollback(); conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to save non-conformity: {e}")
+@app.post("/audits/{audit_id}/complete")
+def complete_audit(audit_id: int, payload: CompleteAuditIn):
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        score_value = payload.score_global
+
+        if score_value is None:
+            # compute % compliant questions: any attempt true per question
+            cur.execute("""
+                WITH per_q AS (
+                  SELECT question_id, bool_or(is_compliant) AS compliant
+                    FROM answers
+                   WHERE audit_id = %s
+                GROUP BY question_id
+                )
+                SELECT
+                  COALESCE(SUM(CASE WHEN compliant THEN 1 ELSE 0 END),0)::float,
+                  COALESCE(COUNT(*),0)::float
+                FROM per_q
+            """, (audit_id,))
+            srow = cur.fetchone()
+            numer, denom = (srow or (0.0, 0.0))
+            score_value = round((numer / denom) * 100.0, 2) if denom > 0 else 0.0
+
+        cur.execute("""
+            UPDATE audits
+               SET status = 'completed',
+                   ended_at = now(),
+                   score_global = %s
+             WHERE id = %s
+         RETURNING id, status, ended_at, score_global
+        """, (score_value, audit_id))
+        row = cur.fetchone()
+        conn.commit()
+
+        if not row:
+            cur.close(); conn.close()
+            raise HTTPException(status_code=404, detail="Audit not found")
+
+        (aid, status, ended_at, score_global) = row
+        cur.close(); conn.close(); conn = None
+        return {
+            "id": aid,
+            "status": status,
+            "ended_at": ended_at,
+            "score_global": float(score_global) if score_global is not None else None
+        }
+
+    except Exception as e:
+        if conn:
+            conn.rollback(); conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to complete audit: {e}")
 
