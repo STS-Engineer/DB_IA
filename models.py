@@ -48,3 +48,40 @@ class AuditeeCreateOut(BaseModel):
 def today_iso():
     return datetime.now(timezone.utc).date().isoformat()
 
+class AuditStartIn(BaseModel):
+    auditee_id: int
+    type: str
+    questionnaire_version: Optional[str] = None
+    external_id: Optional[str] = None  # uuid from client for idempotency
+
+class QuestionIn(BaseModel):
+    text: str
+    category: Optional[str] = None
+    mandatory: Optional[bool] = True
+    source_doc: Optional[str] = None
+
+class QuestionsBulkIn(BaseModel):
+    version_tag: str
+    questions: List[QuestionIn]
+
+class AnswerIn(BaseModel):
+    question_id: int
+    response_text: Optional[str] = ""
+    is_compliant: Optional[bool] = None
+    attempt_number: int = Field(1, ge=1, le=2)
+    evidence_url: Optional[str] = None
+
+class NonConformityIn(BaseModel):
+    question_id: int
+    description: str
+    severity: Literal["minor","major","critical"] = "major"
+    status: Literal["open","in_progress","closed"] = "open"
+    responsible_id: Optional[int] = None
+    due_date: Optional[date] = None
+    evidence_url: Optional[str] = None
+    closed_at: Optional[datetime] = None
+    closure_comment: Optional[str] = None
+
+class CompleteAuditIn(BaseModel):
+    score_global: Optional[float] = None
+
