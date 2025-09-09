@@ -1,6 +1,6 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import List , Optional
-from datetime import datetime, timezone  
+from typing import List , Optional , Literal
+from datetime import datetime, timezone , date 
 
 class ActionStep(BaseModel):
     description: str
