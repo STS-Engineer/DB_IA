@@ -365,7 +365,7 @@ def auditee_check(first_name: str, email: EmailStr):
 
         cur.execute("""
             SELECT id, first_name, email, "function",
-                   plant_id, plant_name, dept_id, dept_name
+                   plant_id, plant_name, dept_id, dept_name , manager_email
             FROM auditees
             WHERE lower(email) = lower(%s)
             LIMIT 1
@@ -377,7 +377,7 @@ def auditee_check(first_name: str, email: EmailStr):
             return {"ok": False, "today": today_iso(), "reason": "Not found"}
 
         (aid, db_first_name, db_email, db_function,
-         plant_id, plant_name, dept_id, dept_name) = row
+         plant_id, plant_name, dept_id, dept_name, manager_email) = row
 
         # Cheap sync of preferred first_name if different
         incoming_first = first_name.strip()
@@ -403,7 +403,8 @@ def auditee_check(first_name: str, email: EmailStr):
                 "plant_id": plant_id,
                 "plant_name": plant_name,
                 "dept_id": dept_id,
-                "dept_name": dept_name
+                "dept_name": dept_name,
+                "manager_email": manager_email
             }
         }
 
@@ -447,31 +448,34 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                     plant_id = COALESCE(%s, plant_id),
                     plant_name = COALESCE(%s, plant_name),
                     dept_id = COALESCE(%s, dept_id),
-                    dept_name = COALESCE(%s, dept_name)
+                    dept_name = COALESCE(%s, dept_name),
+                    manager_email = COALESCE(%s, manager_email)
                 WHERE id = %s
                 RETURNING id, first_name, email, "function",
-                          plant_id, plant_name, dept_id, dept_name
+                          plant_id, plant_name, dept_id, dept_name, manager_email
             """, (
                 payload.first_name.strip(),
                 (payload.function.strip() if payload.function else None),
                 payload.plant_id, payload.plant_name,
                 payload.dept_id, payload.dept_name,
+                _none_if_blank(getattr(payload, "manager_email", None)),
                 aid
             ))
             row = cur.fetchone()
         else:
             cur.execute("""
                 INSERT INTO auditees (first_name, email, "function",
-                                      plant_id, plant_name, dept_id, dept_name)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                                      plant_id, plant_name, dept_id, dept_name, manager_email)
+                VALUES (%s, %s, %s, %s, %s, %s, %s , %s)
                 RETURNING id, first_name, email, "function",
-                          plant_id, plant_name, dept_id, dept_name
+                          plant_id, plant_name, dept_id, dept_name, manager_email
             """, (
                 payload.first_name.strip(),
                 payload.email.strip(),
                 (payload.function.strip() if payload.function else None),
                 payload.plant_id, payload.plant_name,
-                payload.dept_id, payload.dept_name
+                payload.dept_id, payload.dept_name,
+                _none_if_blank(getattr(payload, "manager_email", None))
             ))
             row = cur.fetchone()
 
@@ -488,7 +492,8 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                 "id": aid, "first_name": first_name, "email": email,
                 "function": function,
                 "plant_id": plant_id, "plant_name": plant_name,
-                "dept_id": dept_id, "dept_name": dept_name
+                "dept_id": dept_id, "dept_name": dept_name,
+                "manager_email": manager_email
             }
         }
 
