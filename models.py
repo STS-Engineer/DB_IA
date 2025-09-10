@@ -24,6 +24,8 @@ class AuditeeOut(BaseModel):
     plant_name: Optional[str] = None
     dept_id: Optional[str] = None
     dept_name: Optional[str] = None
+    manager_email: Optional[EmailStr] = None
+   
 
 class AuthAuditeeOut(BaseModel):
     ok: bool
@@ -39,6 +41,7 @@ class AuditeeCreateIn(BaseModel):
     plant_name: Optional[str] = Field(None, max_length=120)
     dept_id: Optional[str] = Field(None, max_length=40)
     dept_name: Optional[str] = Field(None, max_length=120)
+    manager_email: Optional[EmailStr] = None
 
 class AuditeeCreateOut(BaseModel):
     ok: bool
