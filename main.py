@@ -348,40 +348,56 @@ def auth_check(payload: AuthCheckIn):
             conn.close()
         # On garde 200 pour simplicité côté GPT, mais on peut aussi lever 500
         return {"ok": False, "reason": f"Server error"}
-# ----------------------
+# ------------------------------------------------------------------------------------------------
 # 8) GET /auditees/check  (auth by first_name + email)
-# ----------------------
+# ------------------------------------------------------------------------------------------------
 @app.get("/auditees/check", response_model=AuthAuditeeOut)
-def auditee_check(first_name: str, email: EmailStr):
+def auditee_check(first_name: str, email: EmailStr, code: str):
     """
-    - If an auditee exists for this email (case-insensitive): ok=true and return profile
-    - If not found: ok=false (assistant will ask for missing fields and call POST /auditees)
-    - Also returns 'today' (UTC) so the assistant uses it as the audit date
+    Auth: first_name (case-insensitive) + email (case-insensitive) + code (exact)
+    - If match: ok=true and return profile
+    - If not found or first_name mismatch: ok=false with reason
+    - Always returns 'today' (UTC) for assistant to use as audit date
     """
     conn = None
     try:
         conn = get_connection()
         cur = conn.cursor()
 
+        # 1) Find by email + code
         cur.execute("""
             SELECT id, first_name, email, "function",
-                   plant_id, plant_name, dept_id, dept_name , manager_email
+                   plant_id, plant_name, dept_id, dept_name, manager_email, code
             FROM auditees
             WHERE lower(email) = lower(%s)
+              AND code = %s
             LIMIT 1
-        """, (email,))
+        """, (email, code))
         row = cur.fetchone()
 
         if not row:
             cur.close(); conn.close()
-            return {"ok": False, "today": today_iso(), "reason": "Not found"}
+            return {
+                "ok": False,
+                "today": today_iso(),
+                "reason": "Not found for provided email+code"
+            }
 
         (aid, db_first_name, db_email, db_function,
-         plant_id, plant_name, dept_id, dept_name, manager_email) = row
+         plant_id, plant_name, dept_id, dept_name, manager_email, db_code) = row
 
-        # Cheap sync of preferred first_name if different
-        incoming_first = first_name.strip()
-        if incoming_first and incoming_first != db_first_name:
+        # 2) Verify first_name (case-insensitive)
+        incoming_first = (first_name or "").strip()
+        if not incoming_first or incoming_first.casefold() != (db_first_name or "").strip().casefold():
+            cur.close(); conn.close()
+            return {
+                "ok": False,
+                "today": today_iso(),
+                "reason": "First name does not match this email+code"
+            }
+
+        # 3) Optional: cheap sync display of first_name (e.g., capitalization/spacing)
+        if incoming_first != db_first_name:
             cur.execute("""
                 UPDATE auditees
                 SET first_name = %s
@@ -404,14 +420,15 @@ def auditee_check(first_name: str, email: EmailStr):
                 "plant_name": plant_name,
                 "dept_id": dept_id,
                 "dept_name": dept_name,
-                "manager_email": manager_email
+                "manager_email": manager_email,
+                "code": db_code,
             }
         }
 
     except Exception as e:
         if conn:
             conn.close()
-        # keep 200 with reason so your assistant handles uniformly
+        # Keep 200 so the assistant handles uniformly
         return {"ok": False, "today": today_iso(), "reason": f"Server error: {e}"}
 
 
