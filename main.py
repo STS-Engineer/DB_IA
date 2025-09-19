@@ -555,6 +555,60 @@ def audit_start(payload: AuditStartIn):
             conn.rollback(); conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to start audit: {e}")
 
+@app.get("/audits/{audit_id}/answers")
+def get_answers(audit_id: int):
+    """
+    Get all answers for a given audit_id, linked with the auditee.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        # join answers with audits to fetch auditee info
+        cur.execute("""
+            SELECT a.answer_id,
+                   a.audit_id,
+                   q.text AS question_text,
+                   a.response_text,
+                   a.is_compliant,
+                   a.attempt_number,
+                   a.evidence_url,
+                   a.created_at,
+                   au.auditee_id,
+                   au.auditee_name
+            FROM answers a
+            JOIN audits au ON a.audit_id = au.audit_id
+            JOIN questions q ON a.question_id = q.id
+            WHERE a.audit_id = %s
+            ORDER BY q.id, a.attempt_number
+        """, (audit_id,))
+        rows = cur.fetchall()
+        cur.close(); conn.close(); conn = None
+
+        answers = []
+        for r in rows:
+            answers.append({
+                "answer_id": r[0],
+                "audit_id": r[1],
+                "question_text": r[2],
+                "response_text": r[3],
+                "is_compliant": r[4],
+                "attempt_number": r[5],
+                "evidence_url": r[6],
+                "created_at": r[7].isoformat() if r[7] else None,
+                "auditee_id": r[8],
+                "auditee_name": r[9],
+            })
+
+        return {"ok": True, "audit_id": audit_id, "count": len(answers), "answers": answers}
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch answers: {e}")
+
+
 @app.post("/questions/bulk")
 def questions_bulk_upsert(payload: QuestionsBulkIn):
     """
