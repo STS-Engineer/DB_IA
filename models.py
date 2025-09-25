@@ -88,3 +88,27 @@ class NonConformityIn(BaseModel):
 class CompleteAuditIn(BaseModel):
     score_global: Optional[float] = None
 
+# -------------------------------------------------
+# Models & helpers for Sales
+# -------------------------------------------------
+class ObjectionOut(BaseModel):
+    id: int
+    customer_concern: str
+    example_customer_argument: str
+    recommended_response: str
+    category: Optional[str] = None
+
+    class Config:
+        orm_mode = True
+
+class MatrixOut(BaseModel):
+    id: int
+    freeze_time_respected: bool
+    demand_vs_moq: str
+    inventory_vs_demand: str
+    recommended_strategy: str
+
+    class Config:
+        orm_mode = True
+
+
