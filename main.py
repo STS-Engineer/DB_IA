@@ -10,7 +10,9 @@ from models import (
     QuestionsBulkIn,       
     AnswerIn,              
     NonConformityIn,       
-    CompleteAuditIn,       
+    CompleteAuditIn, 
+    ObjectionOut,
+    MatrixOut
 )
 from datetime import datetime , date
 from db import get_connection , get_connection_sales
