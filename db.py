@@ -9,3 +9,13 @@ def get_connection():
         password="$#fKcdXPg4@ue8AW",
         sslmode="require"
     )
+def get_connection_sales():
+    return psycopg2.connect(
+        host="avo-adb-001.postgres.database.azure.com",
+        port=5432,
+        database="Sales",   
+        user="adminavo",     
+        password="$#fKcdXPg4@ue8AW",
+        sslmode="require"
+    )
+
