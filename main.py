@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, File, Form, UploadFile
+from fastapi import FastAPI, HTTPException, File, Form, UploadFile , Query
 from pydantic import BaseModel, EmailStr , Field            
 from models import (
     ActionPlan,
@@ -13,13 +13,14 @@ from models import (
     CompleteAuditIn,       
 )
 from datetime import datetime , date
-from db import get_connection
+from db import get_connection , get_connection_sales
 from fastapi.responses import StreamingResponse
 import base64
 import io
 import mimetypes
 import json
 import requests
+import psycopg2.extras
 
 app = FastAPI()
 
@@ -776,4 +777,103 @@ def complete_audit(audit_id: int, payload: CompleteAuditIn):
         if conn:
             conn.rollback(); conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to complete audit: {e}")
+
+# ----------------------
+# 10) GET /objections                                      
+# ----------------------
+
+@app.get("/objections", response_model=list[ObjectionOut])
+def get_objections(
+    category: str | None = Query(None, description="Filter by category (e.g. 'Lead Time', 'MOQ')"),
+    q: str | None = Query(None, description="Full-text search in concern/argument/response"),
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+):
+    conn = None
+    try:
+        conn = get_connection_sales()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        sql = """
+            SELECT id, customer_concern, example_customer_argument, recommended_response, category
+            FROM customer_objection_handling
+            WHERE 1=1
+        """
+        params: list = []
+
+        if category:
+            sql += " AND category = %s"
+            params.append(category)
+
+        if q:
+            like = f"%{q}%"
+            sql += """
+                AND (
+                    customer_concern ILIKE %s OR
+                    example_customer_argument ILIKE %s OR
+                    recommended_response ILIKE %s
+                )
+            """
+            params.extend([like, like, like])
+
+        sql += " ORDER BY id LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return rows
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch objections: {e}")
+# ----------------------
+# 9) GET / matrix                                      
+# ----------------------
+
+@app.get("/matrix", response_model=list[MatrixOut])
+def get_matrix(
+    freeze_time_respected: bool | None = Query(None, description="true or false"),
+    demand_vs_moq: str | None = Query(None, description="e.g. '> MOQ' or '< MOQ'"),
+    inventory_vs_demand: str | None = Query(None, description="e.g. 'No stock', 'Exact match'"),
+    limit: int = Query(200, ge=1, le=2000),
+    offset: int = Query(0, ge=0),
+):
+    conn = None
+    try:
+        conn = get_connection_sales()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        sql = """
+            SELECT id, freeze_time_respected, demand_vs_moq, inventory_vs_demand, recommended_strategy
+            FROM customer_handling_matrix
+            WHERE 1=1
+        """
+        params: list = []
+
+        if freeze_time_respected is not None:
+            sql += " AND freeze_time_respected = %s"
+            params.append(freeze_time_respected)
+
+        if demand_vs_moq:
+            sql += " AND demand_vs_moq = %s"
+            params.append(demand_vs_moq)
+
+        if inventory_vs_demand:
+            sql += " AND inventory_vs_demand = %s"
+            params.append(inventory_vs_demand)
+
+        sql += " ORDER BY id LIMIT %s OFFSET %s"
+        params.extend([limit, offset])
+
+        cur.execute(sql, params)
+        rows = cur.fetchall()
+        cur.close(); conn.close()
+        return rows
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Failed to fetch matrix: {e}")
 
