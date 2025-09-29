@@ -12,7 +12,9 @@ from models import (
     NonConformityIn,       
     CompleteAuditIn, 
     ObjectionOut,
-    MatrixOut
+    MatrixOut,
+    AuditeePrecheckIn ,
+    AuditeePrecheckOut
 )
 from datetime import datetime , date
 from db import get_connection , get_connection_sales
@@ -351,6 +353,90 @@ def auth_check(payload: AuthCheckIn):
             conn.close()
         # On garde 200 pour simplicité côté GPT, mais on peut aussi lever 500
         return {"ok": False, "reason": f"Server error"}
+        @app.post("/auditees/precheck", response_model=AuditeePrecheckOut, status_code=200)
+# ------------------------------------------------------------------------------------------------
+# 11) GET /auditees/precheck  (auth by first_name + email)
+# ------------------------------------------------------------------------------------------------
+def auditee_precheck(payload: AuditeePrecheckIn):
+    """
+    Step A: Profile Pre-Check.
+    - Input: first_name + email
+    - If auditee exists:
+        * Return profile.
+        * Flag profile_incomplete if plant/dept are missing.
+    - If not exists:
+        * exists=false → client should collect full profile and call /auditees.
+    """
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT id, first_name, email, "function",
+                   plant_id, plant_name, dept_id, dept_name, manager_email
+            FROM auditees
+            WHERE lower(email) = lower(%s)
+            LIMIT 1
+        """, (payload.email,))
+        row = cur.fetchone()
+
+        if not row:
+            cur.close(); conn.close()
+            return {
+                "ok": True,
+                "today": today_iso(),
+                "exists": False,
+                "reason": "No profile was found for this email."
+            }
+
+        (
+            aid, db_first_name, db_email, db_function,
+            plant_id, plant_name, dept_id, dept_name, manager_email
+        ) = row
+
+        incoming_first = payload.first_name.strip()
+        if incoming_first and incoming_first != db_first_name:
+            cur.execute("""
+                UPDATE auditees
+                SET first_name = %s
+                WHERE id = %s
+            """, (incoming_first, aid))
+            conn.commit()
+            db_first_name = incoming_first
+
+        cur.close(); conn.close()
+
+        # Profile completeness check
+        profile_incomplete = not (plant_id and dept_id)
+
+        return {
+            "ok": True,
+            "today": today_iso(),
+            "exists": True,
+            "profile_incomplete": profile_incomplete,
+            "auditee": {
+                "id": aid,
+                "first_name": db_first_name,
+                "email": db_email,
+                "function": db_function,
+                "plant_id": plant_id,
+                "plant_name": plant_name,
+                "dept_id": dept_id,
+                "dept_name": dept_name,
+                "manager_email": manager_email,
+            },
+        }
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        return {
+            "ok": False,
+            "today": today_iso(),
+            "exists": False,
+            "reason": f"Server error: {e}"
+        }
 # ------------------------------------------------------------------------------------------------
 # 8) GET /auditees/check  (auth by first_name + email)
 # ------------------------------------------------------------------------------------------------
