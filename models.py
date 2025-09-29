@@ -15,6 +15,18 @@ class ActionPlan(BaseModel):
 # ----------------------
 # Models & helpers for Auditee auth/create
 # ----------------------
+class AuditeePrecheckIn(BaseModel):
+    first_name: str
+    email: EmailStr
+
+class AuditeePrecheckOut(BaseModel):
+    ok: bool
+    today: str
+    exists: bool
+    profile_incomplete: Optional[bool] = None
+    auditee: Optional[AuditeeOut] = None
+    reason: Optional[str] = None
+    
 class AuditeeOut(BaseModel):
     id: int
     first_name: str
