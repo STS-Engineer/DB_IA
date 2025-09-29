@@ -478,7 +478,6 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                 (payload.function.strip() if payload.function else None),
                 payload.plant_id, payload.plant_name,
                 payload.dept_id, payload.dept_name,
-                _none_if_blank(getattr(payload, "manager_email", None)),
                 aid
             ))
             row = cur.fetchone()
@@ -495,7 +494,6 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                 (payload.function.strip() if payload.function else None),
                 payload.plant_id, payload.plant_name,
                 payload.dept_id, payload.dept_name,
-                _none_if_blank(getattr(payload, "manager_email", None))
             ))
             row = cur.fetchone()
 
