@@ -442,7 +442,7 @@ def auditee_check(first_name: str, email: EmailStr, code: str):
 def create_or_update_auditee(payload: AuditeeCreateIn):
     """
     Upsert rule:
-      - If email exists -> update provided fields
+      - If email exists -> update provided fields (non-null keep existing via COALESCE)
       - If not -> insert new row
     Returns the full profile + today's date for the audit.
     """
@@ -451,110 +451,116 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
         conn = get_connection()
         cur = conn.cursor()
 
+        # Normalize inputs (preserve first_name spelling, just trim spaces)
+        email_val = payload.email.strip()
+        first_name_val = payload.first_name.strip()
+        function_val = payload.function.strip() if payload.function else None
+        plant_id_val = payload.plant_id.strip() if payload.plant_id else None
+        plant_name_val = payload.plant_name.strip() if payload.plant_name else None
+        dept_id_val = payload.dept_id.strip() if payload.dept_id else None
+        dept_name_val = payload.dept_name.strip() if payload.dept_name else None
+        manager_email_val = payload.manager_email.strip() if payload.manager_email else None
+
         # Exists?
-        cur.execute("""
+        cur.execute(
+            """
             SELECT id FROM auditees
             WHERE lower(email) = lower(%s)
             LIMIT 1
-        """, (payload.email,))
+            """,
+            (email_val,),
+        )
         hit = cur.fetchone()
 
         if hit:
             aid = hit[0]
-            cur.execute("""
+            cur.execute(
+                """
                 UPDATE auditees
-                SET first_name = COALESCE(%s, first_name),
-                    "function" = COALESCE(%s, "function"),
-                    plant_id = COALESCE(%s, plant_id),
-                    plant_name = COALESCE(%s, plant_name),
-                    dept_id = COALESCE(%s, dept_id),
-                    dept_name = COALESCE(%s, dept_name),
+                SET first_name    = COALESCE(%s, first_name),
+                    "function"    = COALESCE(%s, "function"),
+                    plant_id      = COALESCE(%s, plant_id),
+                    plant_name    = COALESCE(%s, plant_name),
+                    dept_id       = COALESCE(%s, dept_id),
+                    dept_name     = COALESCE(%s, dept_name),
                     manager_email = COALESCE(%s, manager_email)
                 WHERE id = %s
                 RETURNING id, first_name, email, "function",
                           plant_id, plant_name, dept_id, dept_name, manager_email
-            """, (
-                payload.first_name.strip(),
-                (payload.function.strip() if payload.function else None),
-                payload.plant_id, payload.plant_name,
-                payload.dept_id, payload.dept_name,
-                aid
-            ))
+                """,
+                (
+                    first_name_val,
+                    function_val,
+                    plant_id_val,
+                    plant_name_val,
+                    dept_id_val,
+                    dept_name_val,
+                    manager_email_val,  # <-- was missing
+                    aid,                # <-- WHERE id = %s
+                ),
+            )
             row = cur.fetchone()
         else:
-            cur.execute("""
-                INSERT INTO auditees (first_name, email, "function",
-                                      plant_id, plant_name, dept_id, dept_name, manager_email)
-                VALUES (%s, %s, %s, %s, %s, %s, %s , %s)
+            cur.execute(
+                """
+                INSERT INTO auditees (
+                    first_name, email, "function",
+                    plant_id, plant_name, dept_id, dept_name, manager_email
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id, first_name, email, "function",
                           plant_id, plant_name, dept_id, dept_name, manager_email
-            """, (
-                payload.first_name.strip(),
-                payload.email.strip(),
-                (payload.function.strip() if payload.function else None),
-                payload.plant_id, payload.plant_name,
-                payload.dept_id, payload.dept_name
-            ))
+                """,
+                (
+                    first_name_val,
+                    email_val,
+                    function_val,
+                    plant_id_val,
+                    plant_name_val,
+                    dept_id_val,
+                    dept_name_val,
+                    manager_email_val,  # <-- was missing
+                ),
+            )
             row = cur.fetchone()
 
         conn.commit()
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
 
-        (aid, first_name, email, function,
-         plant_id, plant_name, dept_id, dept_name) = row
+        (
+            aid,
+            first_name,
+            email,
+            function,
+            plant_id,
+            plant_name,
+            dept_id,
+            dept_name,
+            manager_email,  # <-- include this in unpack
+        ) = row
 
         return {
             "ok": True,
             "today": today_iso(),
             "auditee": {
-                "id": aid, "first_name": first_name, "email": email,
+                "id": aid,
+                "first_name": first_name,
+                "email": email,
                 "function": function,
-                "plant_id": plant_id, "plant_name": plant_name,
-                "dept_id": dept_id, "dept_name": dept_name,
-                "manager_email": manager_email
-            }
+                "plant_id": plant_id,
+                "plant_name": plant_name,
+                "dept_id": dept_id,
+                "dept_name": dept_name,
+                "manager_email": manager_email,
+            },
         }
 
-    except Exception as e:
+    except Exception:
         if conn:
             conn.rollback()
             conn.close()
-        raise HTTPException(status_code=500, detail=f"Failed to upsert auditee: {e}")
-
-@app.post("/audits/start")
-def audit_start(payload: AuditStartIn):
-    conn = None
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-
-        cur.execute("""
-            INSERT INTO audits (auditee_id, type, questionnaire_version, external_id, status, started_at)
-            VALUES (%s, %s, %s, %s, 'in_progress', now())
-            RETURNING id, auditee_id, type, status, started_at, questionnaire_version, score_global
-        """, (
-            payload.auditee_id, payload.type, payload.questionnaire_version, payload.external_id
-        ))
-
-        row = cur.fetchone()
-        conn.commit()
-        cur.close(); conn.close(); conn = None
-
-        (aid, auditee_id, atype, status, started_at, qv, score) = row
-        return {
-            "id": aid,
-            "auditee_id": auditee_id,
-            "type": atype,
-            "status": status,
-            "started_at": started_at,
-            "questionnaire_version": qv,
-            "score_global": float(score) if score is not None else None
-        }
-
-    except Exception as e:
-        if conn:
-            conn.rollback(); conn.close()
-        raise HTTPException(status_code=500, detail=f"Failed to start audit: {e}")
+        raise HTTPException(status_code=500, detail="Failed to upsert auditee.")
 
 @app.get("/audits/{audit_id}/answers")
 def get_answers(audit_id: int):
