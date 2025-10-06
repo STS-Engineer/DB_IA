@@ -988,12 +988,25 @@ def get_matrix(
 # Conversation Logger endpoints
 # ======================
 # POST /conversations  (save one conversation row)
+# POST /conversations  (save one conversation row)
 @app.post("/conversations", response_model=ConversationOut)
 def save_conversation(payload: ConversationIn):
-    if payload.assistant_id not in ASSISTANTS:
+    """
+    Security: No Authorization header required (intended for internal/testing).
+    Business rules:
+      - assistant_id may be None for early checkpoints (e.g., after language selection).
+      - If assistant_id is provided, it must exist in ASSISTANTS.
+      - Never expose raw error details.
+    """
+
+    # Validate assistant_id only if provided
+    if payload.assistant_id is not None and payload.assistant_id not in ASSISTANTS:
         raise HTTPException(status_code=400, detail="Invalid assistant_id")
 
-    assistant_name = ASSISTANTS[payload.assistant_id]
+    assistant_name: Optional[str] = (
+        ASSISTANTS[payload.assistant_id] if payload.assistant_id is not None else None
+    )
+
     new_id = str(uuid.uuid4())
 
     conn = None
@@ -1039,7 +1052,7 @@ def save_conversation(payload: ConversationIn):
                 payload.ui_lang, payload.person_name,
                 str(payload.person_email) if payload.person_email else None,
                 payload.session_id, payload.completed_at,
-                json.dumps(payload.conversation),
+                json.dumps(payload.conversation or {"ui_lang": payload.ui_lang, "turns": [], "checkpoints": [], "validations": []}),
                 json.dumps(payload.summary) if payload.summary is not None else None,
                 json.dumps(payload.outputs) if payload.outputs is not None else None,
                 payload.status or "active",
@@ -1074,6 +1087,9 @@ def list_conversations(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ):
+    """
+    Security: No Authorization header required (intended for internal/testing).
+    """
     if assistant_name and assistant_name not in ASSISTANTS.values():
         raise HTTPException(status_code=400, detail="Invalid assistant_name")
 
@@ -1133,7 +1149,7 @@ def list_conversations(
 
     except Exception:
         if conn:
-            conn.close()
+            conn.rollback()
         raise HTTPException(status_code=500, detail="Failed to fetch conversations")
     finally:
         if conn:
