@@ -14,7 +14,9 @@ from models import (
     ObjectionOut,
     MatrixOut,
     AuditeePrecheckIn ,
-    AuditeePrecheckOut
+    AuditeePrecheckOut ,
+    ConversationIn ,
+    ConversationOut
 )
 from datetime import datetime , date
 from db import get_connection , get_connection_sales
@@ -25,8 +27,21 @@ import mimetypes
 import json
 import requests
 import psycopg2.extras
+import uuid
 
 app = FastAPI()
+
+# ======================
+# Conversation Logger constants
+# ======================
+ASSISTANTS = {
+    1: "Personal problems",
+    2: "Write mail",
+    3: "Problem Formalization",
+    4: "Generic Training",
+    5: "Product line exploration",
+    6: "Self Audit (Under Revision)",
+}
 
 # ----------------------
 # Helper: Safe Base64 decode with padding fix
@@ -968,4 +983,160 @@ def get_matrix(
         if conn:
             conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to fetch matrix: {e}")
+
+# ======================
+# Conversation Logger endpoints
+# ======================
+# POST /conversations  (save one conversation row)
+@app.post("/conversations", response_model=ConversationOut)
+def save_conversation(payload: ConversationIn):
+    if payload.assistant_id not in ASSISTANTS:
+        raise HTTPException(status_code=400, detail="Invalid assistant_id")
+
+    assistant_name = ASSISTANTS[payload.assistant_id]
+    new_id = str(uuid.uuid4())
+
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        cur.execute(
+            """
+            INSERT INTO conversation_log (
+              id,
+              assistant_id, assistant_name,
+              prompt_name, prompt_version, prompt_notes,
+              ui_lang, person_name, person_email,
+              session_id, started_at, completed_at,
+              conversation, summary, outputs,
+              status, error_count, last_error,
+              meta
+            )
+            VALUES (
+              %s,
+              %s, %s,
+              %s, %s, %s,
+              %s, %s, %s,
+              %s, now(), %s,
+              %s::jsonb, %s::jsonb, %s::jsonb,
+              %s, %s, %s,
+              %s::jsonb
+            )
+            RETURNING
+              id::text,
+              assistant_id, assistant_name,
+              prompt_name, prompt_version, prompt_notes,
+              ui_lang, person_name, person_email,
+              session_id, started_at, completed_at,
+              conversation, summary, outputs,
+              status, error_count, last_error, meta
+            """,
+            (
+                new_id,
+                payload.assistant_id, assistant_name,
+                payload.prompt_name, payload.prompt_version, payload.prompt_notes,
+                payload.ui_lang, payload.person_name,
+                str(payload.person_email) if payload.person_email else None,
+                payload.session_id, payload.completed_at,
+                json.dumps(payload.conversation),
+                json.dumps(payload.summary) if payload.summary is not None else None,
+                json.dumps(payload.outputs) if payload.outputs is not None else None,
+                payload.status or "active",
+                payload.error_count or 0,
+                payload.last_error,
+                json.dumps(payload.meta or {}),
+            ),
+        )
+        row = cur.fetchone()
+        conn.commit()
+        return row
+
+    except Exception:
+        if conn:
+            conn.rollback()
+        # Keep generic error as per your rule (“never expose raw error text”)
+        raise HTTPException(status_code=500, detail="Failed to save conversation")
+    finally:
+        if conn:
+            conn.close()
+
+
+# GET /conversations  (filter by assistant/email/date/status)
+@app.get("/conversations", response_model=List[ConversationOut])
+def list_conversations(
+    assistant_id: Optional[int] = Query(None, ge=1, le=6, description="Filter by assistant_id"),
+    assistant_name: Optional[str] = Query(None, description="Exact name (alternative to id)"),
+    person_email: Optional[str] = Query(None, description="Filter by person_email (case-insensitive)"),
+    status: Optional[str] = Query(None, pattern="^(active|completed|aborted|error)$"),
+    date_from: Optional[datetime] = Query(None, description="UTC lower bound (inclusive)"),
+    date_to: Optional[datetime] = Query(None, description="UTC upper bound (exclusive)"),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+):
+    if assistant_name and assistant_name not in ASSISTANTS.values():
+        raise HTTPException(status_code=400, detail="Invalid assistant_name")
+
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+        clauses: List[str] = []
+        params: List[Any] = []
+
+        if assistant_id is not None:
+            clauses.append("assistant_id = %s")
+            params.append(assistant_id)
+
+        if assistant_name is not None:
+            clauses.append("assistant_name = %s")
+            params.append(assistant_name)
+
+        if person_email:
+            clauses.append("lower(person_email) = lower(%s)")
+            params.append(person_email)
+
+        if status:
+            clauses.append("status = %s")
+            params.append(status)
+
+        if date_from:
+            clauses.append("started_at >= %s")
+            params.append(date_from)
+
+        if date_to:
+            clauses.append("started_at < %s")
+            params.append(date_to)
+
+        where_sql = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+
+        cur.execute(
+            f"""
+            SELECT
+              id::text,
+              assistant_id, assistant_name,
+              prompt_name, prompt_version, prompt_notes,
+              ui_lang, person_name, person_email,
+              session_id, started_at, completed_at,
+              conversation, summary, outputs,
+              status, error_count, last_error, meta
+            FROM conversation_log
+            {where_sql}
+            ORDER BY started_at DESC
+            LIMIT %s OFFSET %s
+            """,
+            params + [limit, offset],
+        )
+        rows = cur.fetchall()
+        return rows
+
+    except Exception:
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail="Failed to fetch conversations")
+    finally:
+        if conn:
+            conn.close()
+
 
