@@ -368,10 +368,11 @@ def auth_check(payload: AuthCheckIn):
             conn.close()
         # On garde 200 pour simplicité côté GPT, mais on peut aussi lever 500
         return {"ok": False, "reason": f"Server error"}
-        @app.post("/auditees/precheck", response_model=AuditeePrecheckOut, status_code=200)
+       
 # ------------------------------------------------------------------------------------------------
 # 11) GET /auditees/precheck  (auth by first_name + email)
 # ------------------------------------------------------------------------------------------------
+@app.post("/auditees/precheck", response_model=AuditeePrecheckOut, status_code=200)
 def auditee_precheck(payload: AuditeePrecheckIn):
     """
     Step A: Profile Pre-Check.
