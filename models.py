@@ -32,9 +32,7 @@ class AuditeeOut(BaseModel):
     first_name: str
     email: EmailStr
     function: Optional[str] = None
-    plant_id: Optional[str] = None
     plant_name: Optional[str] = None
-    dept_id: Optional[str] = None
     dept_name: Optional[str] = None
     manager_email: Optional[EmailStr] = None
    
@@ -49,9 +47,7 @@ class AuditeeCreateIn(BaseModel):
     first_name: str = Field(..., min_length=1, max_length=120)
     email: EmailStr
     function: Optional[str] = Field(None, max_length=120)
-    plant_id: Optional[str] = Field(None, max_length=40)
     plant_name: Optional[str] = Field(None, max_length=120)
-    dept_id: Optional[str] = Field(None, max_length=40)
     dept_name: Optional[str] = Field(None, max_length=120)
     manager_email: Optional[EmailStr] = None
 
