@@ -96,6 +96,20 @@ class NonConformityIn(BaseModel):
 class CompleteAuditIn(BaseModel):
     score_global: Optional[float] = None
 
+class FileUploadPayload(BaseModel):
+    action_plan_id: int
+    filename: str
+    filetype: str
+    content: str  # base64
+
+class AuthCheckIn(BaseModel):
+    name: str
+    code: str
+
+class AuthCheckOut(BaseModel):
+    ok: bool
+    reason: str | None = None
+
 # -------------------------------------------------
 # Models & helpers for Sales
 # -------------------------------------------------
