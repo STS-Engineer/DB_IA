@@ -29,18 +29,6 @@ import uuid
 
 app = FastAPI()
 
-# ======================
-# Conversation Logger constants
-# ======================
-ASSISTANTS = {
-    1: "Personal problems",
-    2: "Write mail",
-    3: "Problem Formalization",
-    4: "Generic Training",
-    5: "Product line exploration",
-    6: "Self Audit (Under Revision)",
-}
-
 # ----------------------
 # Helper: Safe Base64 decode with padding fix
 # ----------------------
