@@ -14,7 +14,11 @@ from models import (
     ObjectionOut,
     MatrixOut,
     AuditeePrecheckIn ,
-    AuditeePrecheckOut 
+    AuditeePrecheckOut ,
+    FileUploadPayload ,
+    AuthCheckIn,
+    AuthCheckOut
+
 )
 from datetime import datetime , date
 from db import get_connection , get_connection_sales
@@ -119,12 +123,6 @@ async def upload_action_file(
 # ----------------------
 # 3. Upload via JSON base64 (depuis ChatGPT)
 # ----------------------
-
-class FileUploadPayload(BaseModel):
-    action_plan_id: int
-    filename: str
-    filetype: str
-    content: str  # base64
 
 @app.post("/upload-generated-file")
 def upload_generated_file(data: FileUploadPayload):
@@ -295,14 +293,6 @@ async def upload_file_to_monday(
 # 7. Auth simple: /auth/check (lecture DB name+code)
 # ----------------------
 
-class AuthCheckIn(BaseModel):
-    name: str
-    code: str
-
-class AuthCheckOut(BaseModel):
-    ok: bool
-    reason: str | None = None  # message générique
-
 @app.post("/auth/check", response_model=AuthCheckOut)
 def auth_check(payload: AuthCheckIn):
     conn = None
@@ -376,7 +366,7 @@ def auditee_precheck(payload: AuditeePrecheckIn):
 
         cur.execute("""
             SELECT id, first_name, email, "function",
-                   plant_id, plant_name, dept_id, dept_name, manager_email
+                   plant_name, dept_name, manager_email
             FROM auditees
             WHERE lower(email) = lower(%s)
             LIMIT 1
@@ -394,7 +384,7 @@ def auditee_precheck(payload: AuditeePrecheckIn):
 
         (
             aid, db_first_name, db_email, db_function,
-            plant_id, plant_name, dept_id, dept_name, manager_email
+            plant_name, dept_name, manager_email
         ) = row
 
         incoming_first = payload.first_name.strip()
@@ -410,7 +400,7 @@ def auditee_precheck(payload: AuditeePrecheckIn):
         cur.close(); conn.close()
 
         # Profile completeness check
-        profile_incomplete = not (plant_id and dept_id)
+        profile_incomplete = not (first_name and email)
 
         return {
             "ok": True,
@@ -422,9 +412,7 @@ def auditee_precheck(payload: AuditeePrecheckIn):
                 "first_name": db_first_name,
                 "email": db_email,
                 "function": db_function,
-                "plant_id": plant_id,
                 "plant_name": plant_name,
-                "dept_id": dept_id,
                 "dept_name": dept_name,
                 "manager_email": manager_email,
             },
@@ -458,7 +446,7 @@ def auditee_check(first_name: str, email: EmailStr, code: str):
         # 1) Find by email + code
         cur.execute("""
             SELECT id, first_name, email, "function",
-                   plant_id, plant_name, dept_id, dept_name, manager_email, code
+                   plant_name, dept_name, manager_email, code
             FROM auditees
             WHERE lower(email) = lower(%s)
               AND code = %s
@@ -475,7 +463,7 @@ def auditee_check(first_name: str, email: EmailStr, code: str):
             }
 
         (aid, db_first_name, db_email, db_function,
-         plant_id, plant_name, dept_id, dept_name, manager_email, db_code) = row
+        plant_name, dept_name, manager_email, db_code) = row
 
         # 2) Verify first_name (case-insensitive)
         incoming_first = (first_name or "").strip()
@@ -507,9 +495,7 @@ def auditee_check(first_name: str, email: EmailStr, code: str):
                 "first_name": db_first_name,
                 "email": db_email,
                 "function": db_function,
-                "plant_id": plant_id,
                 "plant_name": plant_name,
-                "dept_id": dept_id,
                 "dept_name": dept_name,
                 "manager_email": manager_email,
                 "code": db_code,
@@ -543,9 +529,7 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
         email_val = payload.email.strip()
         first_name_val = payload.first_name.strip()
         function_val = payload.function.strip() if payload.function else None
-        plant_id_val = payload.plant_id.strip() if payload.plant_id else None
         plant_name_val = payload.plant_name.strip() if payload.plant_name else None
-        dept_id_val = payload.dept_id.strip() if payload.dept_id else None
         dept_name_val = payload.dept_name.strip() if payload.dept_name else None
         manager_email_val = payload.manager_email.strip() if payload.manager_email else None
 
@@ -567,24 +551,20 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                 UPDATE auditees
                 SET first_name    = COALESCE(%s, first_name),
                     "function"    = COALESCE(%s, "function"),
-                    plant_id      = COALESCE(%s, plant_id),
                     plant_name    = COALESCE(%s, plant_name),
-                    dept_id       = COALESCE(%s, dept_id),
                     dept_name     = COALESCE(%s, dept_name),
                     manager_email = COALESCE(%s, manager_email)
                 WHERE id = %s
                 RETURNING id, first_name, email, "function",
-                          plant_id, plant_name, dept_id, dept_name, manager_email
+                          plant_name, dept_name, manager_email
                 """,
                 (
                     first_name_val,
                     function_val,
-                    plant_id_val,
                     plant_name_val,
-                    dept_id_val,
                     dept_name_val,
-                    manager_email_val,  # <-- was missing
-                    aid,                # <-- WHERE id = %s
+                    manager_email_val, 
+                    aid,               
                 ),
             )
             row = cur.fetchone()
@@ -593,19 +573,17 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                 """
                 INSERT INTO auditees (
                     first_name, email, "function",
-                    plant_id, plant_name, dept_id, dept_name, manager_email
+                    plant_name, dept_name, manager_email
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING id, first_name, email, "function",
-                          plant_id, plant_name, dept_id, dept_name, manager_email
+                          plant_name,  dept_name, manager_email
                 """,
                 (
                     first_name_val,
                     email_val,
                     function_val,
-                    plant_id_val,
                     plant_name_val,
-                    dept_id_val,
                     dept_name_val,
                     manager_email_val,  # <-- was missing
                 ),
@@ -621,9 +599,7 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
             first_name,
             email,
             function,
-            plant_id,
             plant_name,
-            dept_id,
             dept_name,
             manager_email,  # <-- include this in unpack
         ) = row
@@ -636,9 +612,7 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                 "first_name": first_name,
                 "email": email,
                 "function": function,
-                "plant_id": plant_id,
                 "plant_name": plant_name,
-                "dept_id": dept_id,
                 "dept_name": dept_name,
                 "manager_email": manager_email,
             },
