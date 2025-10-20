@@ -144,18 +144,6 @@ class ConversationIn(BaseModel):
     date_conversation: Optional[datetime] = None
     assistant_name: Optional[str] = None
 
-    @root_validator(pre=True)
-    def _defaults_and_trim(cls, values):
-        if not values.get("date_conversation"):
-            values["date_conversation"] = datetime.now(timezone.utc)  # ✅ aware UTC
-        if "user_name" in values and isinstance(values["user_name"], str):
-            values["user_name"] = values["user_name"].strip()
-        if "conversation" in values and isinstance(values["conversation"], str):
-            values["conversation"] = values["conversation"].strip()
-        if "assistant_name" in values and isinstance(values["assistant_name"], str):
-            values["assistant_name"] = values["assistant_name"].strip() or None
-        return values
-
 class ConversationOut(BaseModel):
     id: int
     status: str = "ok"
@@ -173,7 +161,3 @@ class ConversationDetail(BaseModel):
     date_conversation: datetime
     conversation: str
     assistant_name: Optional[str] = None
-
-class ConversationsListOut(BaseModel):
-    items: List[ConversationSummary]
-    total: int
