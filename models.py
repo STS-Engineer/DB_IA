@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, root_validator
 from typing import List , Optional , Literal , Any, Dict
 from datetime import datetime, timezone , date 
 
@@ -133,3 +133,53 @@ class MatrixOut(BaseModel):
 
     class Config:
         orm_mode = True
+
+# -------------------------------------------------
+# Conversations Models
+# -------------------------------------------------
+
+class ConversationIn(BaseModel):
+    user_name: str = Field(..., min_length=1, max_length=200)
+    conversation: str = Field(..., min_length=1)
+    date_conversation: Optional[datetime] = None
+    assistant_name: Optional[str] = None
+
+    @root_validator(pre=True)
+    def _defaults_and_trim(cls, values):
+        if not values.get("date_conversation"):
+            values["date_conversation"] = datetime.now(timezone.utc)  # ✅ aware UTC
+        if "user_name" in values and isinstance(values["user_name"], str):
+            values["user_name"] = values["user_name"].strip()
+        if "conversation" in values and isinstance(values["conversation"], str):
+            values["conversation"] = values["conversation"].strip()
+        if "assistant_name" in values and isinstance(values["assistant_name"], str):
+            values["assistant_name"] = values["assistant_name"].strip() or None
+        return values
+
+class ConversationOut(BaseModel):
+    id: int
+    status: str = "ok"
+
+class ConversationSummary(BaseModel):
+    id: int
+    user_name: str
+    date_conversation: datetime
+    preview: str
+    assistant_name: Optional[str] = None
+
+class ConversationDetail(BaseModel):
+    id: int
+    user_name: str
+    date_conversation: datetime
+    conversation: str
+    assistant_name: Optional[str] = None
+
+class ConversationsListOut(BaseModel):
+    items: List[ConversationSummary]
+    total: int
+
+# Small helper you’ll use in the list endpoint
+def build_preview(text: str, max_len: int = 140) -> str:
+    t = (text or "").strip().replace("\n", " ").replace("\r", " ")
+    t = " ".join(t.split())
+    return (t[:max_len] + "…") if len(t) > max_len else t
