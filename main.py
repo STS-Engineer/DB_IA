@@ -17,10 +17,16 @@ from models import (
     AuditeePrecheckOut ,
     FileUploadPayload ,
     AuthCheckIn,
-    AuthCheckOut
+    AuthCheckOut,
+    ConversationIn, 
+    ConversationOut, 
+    ConversationSummary,
+    ConversationDetail, 
+    ConversationsListOut, 
+    build_preview
 
 )
-from datetime import datetime , date
+from datetime import datetime , date, timezone
 from db import get_connection , get_connection_sales
 from fastapi.responses import StreamingResponse
 import base64
@@ -945,4 +951,165 @@ def get_matrix(
             conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to fetch matrix: {e}")
 
+# ----------------------
+# Conversations api's                                      
+# ----------------------
 
+@app.post("/save-conversation", response_model=ConversationOut, tags=["Conversations"])
+def save_conversation(payload: ConversationIn):
+    """Save a new conversation to the database."""
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        # Use UTC-aware timestamp (payload already defaulted to UTC in models, but keep fallback)
+        date_conv = payload.date_conversation or datetime.now(timezone.utc)
+
+        cur.execute(
+            """
+            INSERT INTO conversations (user_name, conversation, date_conversation, assistant_name)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (payload.user_name, payload.conversation, date_conv, payload.assistant_name),
+        )
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close(); conn.close(); conn = None
+
+        return ConversationOut(id=new_id, status="ok")
+
+    except Exception as e:
+        if conn:
+            conn.rollback(); conn.close()
+        raise HTTPException(status_code=500, detail=f"Insertion failed: {e}")
+
+
+@app.get("/conversations", response_model=ConversationsListOut, tags=["Conversations"])
+def list_conversations(
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD, UTC day)"),
+    user_name: Optional[str] = Query(None, description="Case-insensitive partial match"),
+    assistant_name: Optional[str] = Query(None, description="Exact match (use LOWER(...) if you want CI)"),
+    limit: int = Query(50, ge=1, le=200, description="Items per page"),
+    offset: int = Query(0, ge=0, description="Items to skip"),
+):
+    """List conversations with optional filtering and pagination."""
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+
+        where, params = [], []
+
+        if date:
+            # Match whole UTC day (column is TIMESTAMPTZ)
+            where.append("DATE(date_conversation AT TIME ZONE 'UTC') = %s::date")
+            params.append(date)
+
+        if user_name:
+            where.append("LOWER(user_name) LIKE %s")
+            params.append(f"%{user_name.lower()}%")
+
+        if assistant_name:
+            # Exact match uses the regular index on assistant_name
+            where.append("assistant_name = %s")
+            params.append(assistant_name)
+
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+
+        cur.execute(
+            f"""
+            SELECT id, user_name, date_conversation, conversation, assistant_name
+            FROM conversations
+            {where_sql}
+            ORDER BY date_conversation DESC, id DESC
+            LIMIT %s OFFSET %s;
+            """,
+            (*params, limit, offset),
+        )
+        rows = cur.fetchall()
+
+        cur.execute(f"SELECT COUNT(*) FROM conversations {where_sql};", tuple(params))
+        total = cur.fetchone()[0]
+
+        items: List[ConversationSummary] = []
+        for (cid, uname, dconv, conv, aname) in rows:
+            items.append(ConversationSummary(
+                id=cid,
+                user_name=uname,
+                date_conversation=dconv,
+                preview=build_preview(conv),
+                assistant_name=aname
+            ))
+
+        cur.close(); conn.close(); conn = None
+        return {"items": items, "total": total}
+
+    except Exception as e:
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+
+@app.get("/conversations/{id}", response_model=ConversationDetail, tags=["Conversations"])
+def get_conversation_by_id(id: int = Path(..., ge=1, description="Conversation ID to retrieve")):
+    """Retrieve a complete conversation by ID."""
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute(
+            """
+            SELECT id, user_name, date_conversation, conversation, assistant_name
+            FROM conversations
+            WHERE id = %s;
+            """,
+            (id,),
+        )
+        row = cur.fetchone()
+        cur.close(); conn.close(); conn = None
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        return ConversationDetail(
+            id=row[0],
+            user_name=row[1],
+            date_conversation=row[2],
+            conversation=row[3],
+            assistant_name=row[4],
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+
+@app.get("/conversations/{id}/export.txt", tags=["Conversations"])
+def export_conversation_txt(id: int = Path(..., ge=1, description="Conversation ID to export as text")):
+    """Export the conversation text as plain text."""
+    from fastapi.responses import PlainTextResponse
+    conn = None
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        cur.execute("SELECT conversation FROM conversations WHERE id=%s;", (id,))
+        row = cur.fetchone()
+        cur.close(); conn.close(); conn = None
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        txt = (row[0] or "").replace(" , ", "\n").strip()
+        return PlainTextResponse(content=txt, media_type="text/plain")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        if conn:
+            conn.close()
+        raise HTTPException(status_code=500, detail=f"Export failed: {e}")
