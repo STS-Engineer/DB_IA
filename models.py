@@ -177,9 +177,3 @@ class ConversationDetail(BaseModel):
 class ConversationsListOut(BaseModel):
     items: List[ConversationSummary]
     total: int
-
-# Small helper you’ll use in the list endpoint
-def build_preview(text: str, max_len: int = 140) -> str:
-    t = (text or "").strip().replace("\n", " ").replace("\r", " ")
-    t = " ".join(t.split())
-    return (t[:max_len] + "…") if len(t) > max_len else t
