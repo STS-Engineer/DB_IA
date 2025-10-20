@@ -22,8 +22,7 @@ from models import (
     ConversationOut, 
     ConversationSummary,
     ConversationDetail, 
-    ConversationsListOut, 
-    build_preview
+    ConversationsListOut
 
 )
 from datetime import datetime , date, timezone
@@ -1088,28 +1087,3 @@ def get_conversation_by_id(id: int = Path(..., ge=1, description="Conversation I
             conn.close()
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
 
-
-@app.get("/conversations/{id}/export.txt", tags=["Conversations"])
-def export_conversation_txt(id: int = Path(..., ge=1, description="Conversation ID to export as text")):
-    """Export the conversation text as plain text."""
-    from fastapi.responses import PlainTextResponse
-    conn = None
-    try:
-        conn = get_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT conversation FROM conversations WHERE id=%s;", (id,))
-        row = cur.fetchone()
-        cur.close(); conn.close(); conn = None
-
-        if not row:
-            raise HTTPException(status_code=404, detail="Conversation not found")
-
-        txt = (row[0] or "").replace(" , ", "\n").strip()
-        return PlainTextResponse(content=txt, media_type="text/plain")
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        if conn:
-            conn.close()
-        raise HTTPException(status_code=500, detail=f"Export failed: {e}")
