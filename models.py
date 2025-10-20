@@ -1,7 +1,7 @@
-from pydantic import BaseModel, EmailStr, Field, root_validator
+from pydantic import BaseModel, EmailStr, Field
 from typing import List , Optional , Literal , Any, Dict
 from datetime import datetime, timezone , date 
-from __future__ import annotations
+
 
 class ActionStep(BaseModel):
     description: str
@@ -133,50 +133,3 @@ class MatrixOut(BaseModel):
 
     class Config:
         orm_mode = True
-
-# ---------- INPUT (create) ----------
-class ConversationIn(BaseModel):
-    """Payload to create a conversation row."""
-    user_name: str = Field(..., min_length=1, max_length=200)
-    conversation: str = Field(..., min_length=1)
-    # optional: client can override; otherwise we default to now UTC to match TIMESTAMPTZ
-    date_conversation: Optional[datetime] = None
-    assistant_name: Optional[str] = Field(None, max_length=255)
-
-    @root_validator(pre=True)
-    def _defaults_and_trim(cls, values):
-        if not values.get("date_conversation"):
-            values["date_conversation"] = datetime.now(timezone.utc)
-        conv = values.get("conversation")
-        if isinstance(conv, str):
-            values["conversation"] = conv.strip()
-        return values
-
-
-# ---------- OUTPUT (after create) ----------
-class ConversationOut(BaseModel):
-    """Minimal success response after insert."""
-    id: int
-    status: str = "ok"
-
-
-# ---------- LIST ITEM (summary) ----------
-class ConversationSummary(BaseModel):
-    """Row for listing with a short preview."""
-    id: int
-    user_name: str
-    date_conversation: datetime
-    preview: str
-    assistant_name: Optional[str] = None
-
-
-# ---------- DETAIL (full row) ----------
-class ConversationDetail(BaseModel):
-    """Full record as stored in DB (without created_at unless you want it)."""
-    id: int
-    user_name: str
-    conversation: str
-    date_conversation: datetime
-    assistant_name: Optional[str] = None
-    # If you want to expose created_at too, uncomment the next line:
-    # created_at: Optional[datetime] = None
