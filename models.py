@@ -2,7 +2,6 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import List , Optional , Literal , Any, Dict
 from datetime import datetime, timezone , date 
 
-
 class ActionStep(BaseModel):
     description: str
     due_date: str  # use ISO format (e.g., 2025-07-01)
@@ -98,18 +97,18 @@ class CompleteAuditIn(BaseModel):
     score_global: Optional[float] = None
 
 class FileUploadPayload(BaseModel):
-    action_plan_id: int
-    filename: str
-    filetype: str
-    content: str  # base64
+    action_plan_id: int
+    filename: str
+    filetype: str
+    content: str
 
 class AuthCheckIn(BaseModel):
-    name: str
-    code: str
+    name: str
+    code: str
 
 class AuthCheckOut(BaseModel):
-    ok: bool
-    reason: str | None = None
+    ok: bool
+    reason: str | None = None
 
 # -------------------------------------------------
 # Models & helpers for Sales
@@ -133,10 +132,6 @@ class MatrixOut(BaseModel):
 
     class Config:
         orm_mode = True
-
-# -------------------------------------------------
-# Conversations Models
-# -------------------------------------------------
 
 # -------------------------------------------------
 # Conversations Models
