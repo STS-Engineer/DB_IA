@@ -1,31 +1,31 @@
-from fastapi import FastAPI, HTTPException, File, Form, UploadFile , Query
-from pydantic import BaseModel, EmailStr , Field            
+from fastapi import FastAPI, HTTPException, File, Form, UploadFile, Query
+from pydantic import BaseModel, EmailStr, Field
 from models import (
     ActionPlan,
     AuditeeCreateIn,
     AuditeeCreateOut,
     AuthAuditeeOut,
     today_iso,
-    AuditStartIn,          
-    QuestionsBulkIn,       
-    AnswerIn,              
-    NonConformityIn,       
-    CompleteAuditIn, 
+    AuditStartIn,
+    QuestionsBulkIn,
+    AnswerIn,
+    NonConformityIn,
+    CompleteAuditIn,
     ObjectionOut,
     MatrixOut,
-    AuditeePrecheckIn ,
-    AuditeePrecheckOut ,
-    FileUploadPayload ,
+    AuditeePrecheckIn,
+    AuditeePrecheckOut,
+    FileUploadPayload,
     AuthCheckIn,
     AuthCheckOut,
-    ConversationIn, 
-    ConversationOut, 
+    ConversationIn,
+    ConversationOut,
     ConversationSummary,
     ConversationDetail,
     ConversationsListOut
 )
-from datetime import datetime , date, timezone
-from db import get_connection , get_connection_sales
+from datetime import datetime, date, timezone
+from db import get_connection, get_connection_sales
 from fastapi.responses import StreamingResponse
 import base64
 import io
@@ -294,6 +294,7 @@ async def upload_file_to_monday(
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload to Monday failed: {str(e)}")
+
 # ----------------------
 # 7. Auth simple: /auth/check (lecture DB name+code)
 # ----------------------
@@ -349,9 +350,9 @@ def auth_check(payload: AuthCheckIn):
             conn.close()
         # On garde 200 pour simplicité côté GPT, mais on peut aussi lever 500
         return {"ok": False, "reason": f"Server error"}
-       
+
 # ------------------------------------------------------------------------------------------------
-# 11) GET /auditees/precheck  (auth by first_name + email)
+# 11) GET /auditees/precheck (auth by first_name + email)
 # ------------------------------------------------------------------------------------------------
 @app.post("/auditees/precheck", response_model=AuditeePrecheckOut, status_code=200)
 def auditee_precheck(payload: AuditeePrecheckIn):
@@ -379,7 +380,8 @@ def auditee_precheck(payload: AuditeePrecheckIn):
         row = cur.fetchone()
 
         if not row:
-            cur.close(); conn.close()
+            cur.close()
+            conn.close()
             return {
                 "ok": True,
                 "today": today_iso(),
@@ -402,10 +404,11 @@ def auditee_precheck(payload: AuditeePrecheckIn):
             conn.commit()
             db_first_name = incoming_first
 
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
 
         # Profile completeness check
-        profile_incomplete = not (first_name and email)
+        profile_incomplete = not (db_first_name and db_email)
 
         return {
             "ok": True,
@@ -432,8 +435,9 @@ def auditee_precheck(payload: AuditeePrecheckIn):
             "exists": False,
             "reason": f"Server error: {e}"
         }
+
 # ------------------------------------------------------------------------------------------------
-# 8) GET /auditees/check  (auth by first_name + email)
+# 8) GET /auditees/check (auth by first_name + email)
 # ------------------------------------------------------------------------------------------------
 @app.get("/auditees/check", response_model=AuthAuditeeOut)
 def auditee_check(first_name: str, email: EmailStr, code: str):
@@ -460,7 +464,8 @@ def auditee_check(first_name: str, email: EmailStr, code: str):
         row = cur.fetchone()
 
         if not row:
-            cur.close(); conn.close()
+            cur.close()
+            conn.close()
             return {
                 "ok": False,
                 "today": today_iso(),
@@ -468,12 +473,13 @@ def auditee_check(first_name: str, email: EmailStr, code: str):
             }
 
         (aid, db_first_name, db_email, db_function,
-        plant_name, dept_name, manager_email, db_code) = row
+         plant_name, dept_name, manager_email, db_code) = row
 
         # 2) Verify first_name (case-insensitive)
         incoming_first = (first_name or "").strip()
         if not incoming_first or incoming_first.casefold() != (db_first_name or "").strip().casefold():
-            cur.close(); conn.close()
+            cur.close()
+            conn.close()
             return {
                 "ok": False,
                 "today": today_iso(),
@@ -490,7 +496,8 @@ def auditee_check(first_name: str, email: EmailStr, code: str):
             conn.commit()
             db_first_name = incoming_first
 
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
 
         return {
             "ok": True,
@@ -515,7 +522,7 @@ def auditee_check(first_name: str, email: EmailStr, code: str):
 
 
 # ----------------------
-# 9) POST /auditees  (create or update full profile)
+# 9) POST /auditees (create or update full profile)
 # ----------------------
 @app.post("/auditees", response_model=AuditeeCreateOut, status_code=200)
 def create_or_update_auditee(payload: AuditeeCreateIn):
@@ -554,10 +561,10 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
             cur.execute(
                 """
                 UPDATE auditees
-                SET first_name    = COALESCE(%s, first_name),
-                    "function"    = COALESCE(%s, "function"),
-                    plant_name    = COALESCE(%s, plant_name),
-                    dept_name     = COALESCE(%s, dept_name),
+                SET first_name = COALESCE(%s, first_name),
+                    "function" = COALESCE(%s, "function"),
+                    plant_name = COALESCE(%s, plant_name),
+                    dept_name = COALESCE(%s, dept_name),
                     manager_email = COALESCE(%s, manager_email)
                 WHERE id = %s
                 RETURNING id, first_name, email, "function",
@@ -568,8 +575,8 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                     function_val,
                     plant_name_val,
                     dept_name_val,
-                    manager_email_val, 
-                    aid,               
+                    manager_email_val,
+                    aid,
                 ),
             )
             row = cur.fetchone()
@@ -582,7 +589,7 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                 )
                 VALUES (%s, %s, %s, %s, %s, %s)
                 RETURNING id, first_name, email, "function",
-                          plant_name,  dept_name, manager_email
+                          plant_name, dept_name, manager_email
                 """,
                 (
                     first_name_val,
@@ -590,7 +597,7 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
                     function_val,
                     plant_name_val,
                     dept_name_val,
-                    manager_email_val,  # <-- was missing
+                    manager_email_val,
                 ),
             )
             row = cur.fetchone()
@@ -606,7 +613,7 @@ def create_or_update_auditee(payload: AuditeeCreateIn):
             function,
             plant_name,
             dept_name,
-            manager_email,  # <-- include this in unpack
+            manager_email,
         ) = row
 
         return {
@@ -658,7 +665,9 @@ def get_answers(audit_id: int):
             ORDER BY q.id, a.attempt_number
         """, (audit_id,))
         rows = cur.fetchall()
-        cur.close(); conn.close(); conn = None
+        cur.close()
+        conn.close()
+        conn = None
 
         answers = []
         for r in rows:
@@ -718,12 +727,15 @@ def questions_bulk_upsert(payload: QuestionsBulkIn):
             out_items.append({"index": idx, "question_id": qid})
 
         conn.commit()
-        cur.close(); conn.close(); conn = None
+        cur.close()
+        conn.close()
+        conn = None
         return {"ok": True, "version_tag": payload.version_tag, "items": out_items}
 
     except Exception as e:
         if conn:
-            conn.rollback(); conn.close()
+            conn.rollback()
+            conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to upsert questions: {e}")
 
 @app.post("/audits/{audit_id}/answers")
@@ -737,8 +749,8 @@ def save_answer(audit_id: int, payload: AnswerIn):
         cur.execute("""
             UPDATE answers
                SET response_text = %s,
-                   is_compliant  = %s,
-                   evidence_url  = %s
+                   is_compliant = %s,
+                   evidence_url = %s
              WHERE audit_id = %s AND question_id = %s AND attempt_number = %s
          RETURNING answer_id
         """, (
@@ -760,12 +772,15 @@ def save_answer(audit_id: int, payload: AnswerIn):
 
         conn.commit()
         answer_id = row[0]
-        cur.close(); conn.close(); conn = None
+        cur.close()
+        conn.close()
+        conn = None
         return {"ok": True, "answer_id": answer_id}
 
     except Exception as e:
         if conn:
-            conn.rollback(); conn.close()
+            conn.rollback()
+            conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to save answer: {e}")
 
 @app.post("/audits/{audit_id}/nonconformities")
@@ -788,13 +803,17 @@ def save_nc(audit_id: int, payload: NonConformityIn):
         ))
         nc_id = cur.fetchone()[0]
         conn.commit()
-        cur.close(); conn.close(); conn = None
+        cur.close()
+        conn.close()
+        conn = None
         return {"ok": True, "nc_id": nc_id}
 
     except Exception as e:
         if conn:
-            conn.rollback(); conn.close()
+            conn.rollback()
+            conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to save non-conformity: {e}")
+
 @app.post("/audits/{audit_id}/complete")
 def complete_audit(audit_id: int, payload: CompleteAuditIn):
     conn = None
@@ -834,11 +853,14 @@ def complete_audit(audit_id: int, payload: CompleteAuditIn):
         conn.commit()
 
         if not row:
-            cur.close(); conn.close()
+            cur.close()
+            conn.close()
             raise HTTPException(status_code=404, detail="Audit not found")
 
         (aid, status, ended_at, score_global) = row
-        cur.close(); conn.close(); conn = None
+        cur.close()
+        conn.close()
+        conn = None
         return {
             "id": aid,
             "status": status,
@@ -848,11 +870,12 @@ def complete_audit(audit_id: int, payload: CompleteAuditIn):
 
     except Exception as e:
         if conn:
-            conn.rollback(); conn.close()
+            conn.rollback()
+            conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to complete audit: {e}")
 
 # ----------------------
-# 10) GET /objections                                      
+# 10) GET /objections
 # ----------------------
 
 @app.get("/objections", response_model=list[ObjectionOut])
@@ -894,23 +917,25 @@ def get_objections(
 
         cur.execute(sql, params)
         rows = cur.fetchall()
-        cur.close(); conn.close()
+        cur.close()
+        conn.close()
         return rows
 
     except Exception as e:
         if conn:
             conn.close()
         raise HTTPException(status_code=500, detail=f"Failed to fetch objections: {e}")
+
 # ----------------------
-# 9) GET / matrix                                      
+# 9) GET / matrix
 # ----------------------
 
 @app.get("/matrix", response_model=list[MatrixOut])
 def get_matrix():
-    raise HTTPException(status_code=500, detail=f"Failed to fetch matrix: {e}")
+    raise HTTPException(status_code=500, detail="Failed to fetch matrix: not implemented")
 
 # ----------------------
-# Conversations api's                                      
+# Conversations api's
 # ----------------------
 
 @app.post("/save-conversation", response_model=ConversationOut, tags=["Conversations"])
