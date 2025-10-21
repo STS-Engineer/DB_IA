@@ -138,6 +138,10 @@ class MatrixOut(BaseModel):
 # Conversations Models
 # -------------------------------------------------
 
+# -------------------------------------------------
+# Conversations Models
+# -------------------------------------------------
+
 class ConversationIn(BaseModel):
     user_name: str = Field(..., min_length=1, max_length=200)
     conversation: str = Field(..., min_length=1)
@@ -161,3 +165,8 @@ class ConversationDetail(BaseModel):
     date_conversation: datetime
     conversation: str
     assistant_name: Optional[str] = None
+
+class ConversationsListOut(BaseModel):
+    """Model for conversations list response with pagination info"""
+    items: List[ConversationSummary]
+    total: int
