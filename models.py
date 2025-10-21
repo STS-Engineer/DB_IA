@@ -11,7 +11,6 @@ class ActionPlan(BaseModel):
     owner: str
     deadline: str
     steps: List[ActionStep]
-
 # ----------------------
 # Models & helpers for Auditee auth/create
 # ----------------------
@@ -136,7 +135,6 @@ class MatrixOut(BaseModel):
 # -------------------------------------------------
 # Conversations Models
 # -------------------------------------------------
-
 class ConversationIn(BaseModel):
     user_name: str = Field(..., min_length=1, max_length=200)
     conversation: str = Field(..., min_length=1)
