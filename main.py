@@ -35,6 +35,7 @@ import json
 import requests
 import psycopg2.extras
 import uuid
+from typing import Optional
 
 app = FastAPI()
 
@@ -1086,4 +1087,250 @@ def get_conversation_by_id(id: int = Path(..., ge=1, description="Conversation I
         if conn:
             conn.close()
         raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+@app.post("/save-conversation", response_model=ConversationOut, tags=["Conversations"])
+def save_conversation(payload: ConversationIn):
+    """
+    Save a new conversation to the database
+    
+    This endpoint stores a complete conversation with metadata including:
+    - User name (required, 1-200 characters)
+    - Full conversation text (required)
+    - Timestamp (optional, defaults to current UTC time)
+    - Assistant name (optional, for tracking which assistant handled the conversation)
+    
+    Args:
+        payload (ConversationIn): Object containing:
+            - user_name: Name of the user (trimmed of whitespace)
+            - conversation: The complete conversation content
+            - date_conversation: Optional timestamp (defaults to now)
+            - assistant_name: Optional assistant identifier
+    
+    Returns:
+        ConversationOut: Response containing:
+            - id: Unique identifier of the newly created conversation
+            - status: "ok" on success
+    
+    Raises:
+        HTTPException 500: If database insertion fails
+    
+    Example:
+        POST /save-conversation
+        {
+            "user_name": "John Doe",
+            "conversation": "Complete conversation text here...",
+            "assistant_name": "GPT-4"
+        }
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Use provided date or default to current UTC time
+        date_conv = payload.date_conversation or datetime.utcnow()
+        
+        # Insert conversation into database
+        cur.execute(
+            """
+            INSERT INTO conversations (user_name, conversation, date_conversation, assistant_name)
+            VALUES (%s, %s, %s, %s)
+            RETURNING id;
+            """,
+            (payload.user_name.strip(), payload.conversation, date_conv, payload.assistant_name),
+        )
+        
+        new_id = cur.fetchone()[0]
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return ConversationOut(id=new_id, status="ok")
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Insertion failed: {e}")
+
+
+@app.get("/conversations", response_model=ConversationsListOut, tags=["Conversations"])
+def list_conversations(
+    date: Optional[str] = Query(None, description="Filter by date (YYYY-MM-DD format in UTC)"),
+    user_name: Optional[str] = Query(None, description="Filter by user name (case-insensitive partial match)"),
+    assistant_name: Optional[str] = Query(None, description="Filter by assistant name (exact match)"),
+    limit: int = Query(50, ge=1, le=200, description="Number of records to return (1-200, default 50)"),
+    offset: int = Query(0, ge=0, description="Number of records to skip for pagination (default 0)"),
+):
+    """
+    List all conversations with optional filtering and pagination
+    
+    This endpoint retrieves a paginated list of conversations with preview text.
+    Supports multiple filter combinations for flexible querying:
+    - Filter by specific date (UTC timezone)
+    - Search by user name (partial, case-insensitive matching)
+    - Filter by assistant name (exact match)
+    
+    Results are ordered by date (newest first), then by ID (descending).
+    Each conversation includes a 140-character preview of the full text.
+    
+    Args:
+        date (Optional[str]): Filter by conversation date in YYYY-MM-DD format (UTC)
+            Example: "2025-10-21"
+        user_name (Optional[str]): Filter by user name (case-insensitive, partial match)
+            Example: "john" will match "John Doe", "johnny", etc.
+        assistant_name (Optional[str]): Filter by exact assistant name
+            Example: "GPT-4"
+        limit (int): Maximum number of records to return (1-200, default 50)
+        offset (int): Number of records to skip (for pagination, default 0)
+    
+    Returns:
+        ConversationsListOut: Response containing:
+            - items: List of ConversationSummary objects, each with:
+                * id: Conversation unique identifier
+                * user_name: Name of the user
+                * date_conversation: Timestamp of the conversation
+                * preview: First 140 characters of conversation
+                * assistant_name: Name of assistant (if provided)
+            - total: Total count of conversations matching the filters
+    
+    Raises:
+        HTTPException 500: If database query fails
+    
+    Example:
+        GET /conversations?user_name=john&limit=10&offset=0
+        GET /conversations?date=2025-10-21&assistant_name=GPT-4
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Build dynamic WHERE clause based on provided filters
+        where = []
+        params = []
+        
+        if date:
+            where.append("DATE(date_conversation AT TIME ZONE 'UTC') = %s")
+            params.append(date)
+        
+        if user_name:
+            where.append("LOWER(user_name) LIKE %s")
+            params.append(f"%{user_name.lower()}%")
+        
+        if assistant_name:
+            where.append("assistant_name = %s")
+            params.append(assistant_name)
+        
+        where_sql = ("WHERE " + " AND ".join(where)) if where else ""
+        
+        # Fetch conversations with applied filters
+        cur.execute(
+            f"""
+            SELECT id, user_name, date_conversation, conversation, assistant_name
+            FROM conversations
+            {where_sql}
+            ORDER BY date_conversation DESC, id DESC
+            LIMIT %s OFFSET %s;
+            """,
+            (*params, limit, offset),
+        )
+        rows = cur.fetchall()
+        
+        # Get total count for pagination metadata
+        cur.execute(f"SELECT COUNT(*) FROM conversations {where_sql};", tuple(params))
+        total = cur.fetchone()[0]
+        
+        # Build response items with preview
+        items = []
+        for (cid, uname, dconv, conv, aname) in rows:
+            preview = conv[:140]  # First 140 characters as preview
+            items.append(ConversationSummary(
+                id=cid,
+                user_name=uname,
+                date_conversation=dconv,
+                preview=preview,
+                assistant_name=aname
+            ))
+        
+        cur.close()
+        conn.close()
+        
+        return ConversationsListOut(items=items, total=total)
+    
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+
+@app.get("/conversations/{id}", response_model=ConversationDetail, tags=["Conversations"])
+def get_conversation_by_id(id: int):
+    """
+    Retrieve a complete conversation by its unique ID
+    
+    This endpoint fetches the full conversation record including:
+    - Complete conversation text (no truncation)
+    - User information
+    - Timestamp
+    - Assistant information (if available)
+    
+    Use this endpoint when you need the full conversation content,
+    as opposed to the preview provided by the list endpoint.
+    
+    Args:
+        id (int): Unique identifier of the conversation to retrieve (must be >= 1)
+            This is the ID returned when creating a conversation via POST /save-conversation
+    
+    Returns:
+        ConversationDetail: Complete conversation record containing:
+            - id: Conversation unique identifier
+            - user_name: Name of the user
+            - date_conversation: Timestamp when conversation occurred
+            - conversation: Full, complete conversation text
+            - assistant_name: Name of assistant (if provided)
+    
+    Raises:
+        HTTPException 404: If conversation with the specified ID is not found
+        HTTPException 500: If database query fails
+    
+    Example:
+        GET /conversations/123
+        
+        Response:
+        {
+            "id": 123,
+            "user_name": "John Doe",
+            "date_conversation": "2025-10-21T14:30:00Z",
+            "conversation": "Full conversation text here...",
+            "assistant_name": "GPT-4"
+        }
+    """
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
+        
+        # Fetch conversation by ID
+        cur.execute(
+            """
+            SELECT id, user_name, date_conversation, conversation, assistant_name
+            FROM conversations WHERE id=%s;
+            """,
+            (id,),
+        )
+        
+        row = cur.fetchone()
+        cur.close()
+        conn.close()
+        
+        if not row:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        
+        return ConversationDetail(
+            id=row[0],
+            user_name=row[1],
+            date_conversation=row[2],
+            conversation=row[3],
+            assistant_name=row[4]
+        )
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Query failed: {e}")
+
+
+
 
