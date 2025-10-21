@@ -23,7 +23,6 @@ from models import (
     ConversationSummary,
     ConversationDetail,
     ConversationsListOut
-
 )
 from datetime import datetime , date, timezone
 from db import get_connection , get_connection_sales
@@ -907,49 +906,8 @@ def get_objections(
 # ----------------------
 
 @app.get("/matrix", response_model=list[MatrixOut])
-def get_matrix(
-    freeze_time_respected: bool | None = Query(None, description="true or false"),
-    demand_vs_moq: str | None = Query(None, description="e.g. '> MOQ' or '< MOQ'"),
-    inventory_vs_demand: str | None = Query(None, description="e.g. 'No stock', 'Exact match'"),
-    limit: int = Query(200, ge=1, le=2000),
-    offset: int = Query(0, ge=0),
-):
-    conn = None
-    try:
-        conn = get_connection_sales()
-        cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-
-        sql = """
-            SELECT id, freeze_time_respected, demand_vs_moq, inventory_vs_demand, recommended_strategy
-            FROM customer_handling_matrix
-            WHERE 1=1
-        """
-        params: list = []
-
-        if freeze_time_respected is not None:
-            sql += " AND freeze_time_respected = %s"
-            params.append(freeze_time_respected)
-
-        if demand_vs_moq:
-            sql += " AND demand_vs_moq = %s"
-            params.append(demand_vs_moq)
-
-        if inventory_vs_demand:
-            sql += " AND inventory_vs_demand = %s"
-            params.append(inventory_vs_demand)
-
-        sql += " ORDER BY id LIMIT %s OFFSET %s"
-        params.extend([limit, offset])
-
-        cur.execute(sql, params)
-        rows = cur.fetchall()
-        cur.close(); conn.close()
-        return rows
-
-    except Exception as e:
-        if conn:
-            conn.close()
-        raise HTTPException(status_code=500, detail=f"Failed to fetch matrix: {e}")
+def get_matrix():
+    raise HTTPException(status_code=500, detail=f"Failed to fetch matrix: {e}")
 
 # ----------------------
 # Conversations api's                                      
