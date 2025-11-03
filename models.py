@@ -132,34 +132,3 @@ class MatrixOut(BaseModel):
     class Config:
         orm_mode = True
 
-# -------------------------------------------------
-# Conversations Models
-# -------------------------------------------------
-class ConversationIn(BaseModel):
-    user_name: str = Field(..., min_length=1, max_length=200)
-    conversation: str = Field(..., min_length=1)
-    date_conversation: Optional[datetime] = None
-    assistant_name: Optional[str] = None
-
-class ConversationOut(BaseModel):
-    id: int
-    status: str = "ok"
-
-class ConversationSummary(BaseModel):
-    id: int
-    user_name: str
-    date_conversation: datetime
-    preview: str
-    assistant_name: Optional[str] = None
-
-class ConversationDetail(BaseModel):
-    id: int
-    user_name: str
-    date_conversation: datetime
-    conversation: str
-    assistant_name: Optional[str] = None
-
-class ConversationsListOut(BaseModel):
-    """Model for conversations list response with pagination info"""
-    items: List[ConversationSummary]
-    total: int
