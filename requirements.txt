@@ -7,6 +7,3 @@ psycopg2-binary
 fpdf   
 email-validator          
 python-multipart
-starlette
-pydantic
-typing_extensions
