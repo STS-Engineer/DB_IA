@@ -1,19 +1,27 @@
 from pydantic import BaseModel, EmailStr, Field
-from typing import List , Optional , Literal , Any, Dict
-from datetime import datetime, timezone , date 
+from typing import List, Optional, Literal, Any, Dict
+from datetime import datetime, timezone, date
 
-class ActionStep(BaseModel):
-    description: str
-    due_date: str  # use ISO format (e.g., 2025-07-01)
+# ----------------------
+# Helper function
+# ----------------------
+def today_iso():
+    return datetime.now(timezone.utc).date().isoformat()
 
-class ActionPlan(BaseModel):
-    title: str
-    owner: str
-    deadline: str
-    steps: List[ActionStep]
 # ----------------------
 # Models & helpers for Auditee auth/create
 # ----------------------
+
+# Define AuditeeOut FIRST (before it's referenced)
+class AuditeeOut(BaseModel):
+    id: int
+    first_name: str
+    email: EmailStr
+    function: Optional[str] = None
+    plant_name: Optional[str] = None
+    dept_name: Optional[str] = None
+    manager_email: Optional[EmailStr] = None
+
 class AuditeePrecheckIn(BaseModel):
     first_name: str
     email: EmailStr
@@ -25,16 +33,6 @@ class AuditeePrecheckOut(BaseModel):
     profile_incomplete: Optional[bool] = None
     auditee: Optional[AuditeeOut] = None
     reason: Optional[str] = None
-    
-class AuditeeOut(BaseModel):
-    id: int
-    first_name: str
-    email: EmailStr
-    function: Optional[str] = None
-    plant_name: Optional[str] = None
-    dept_name: Optional[str] = None
-    manager_email: Optional[EmailStr] = None
-   
 
 class AuthAuditeeOut(BaseModel):
     ok: bool
@@ -54,9 +52,6 @@ class AuditeeCreateOut(BaseModel):
     ok: bool
     today: str
     auditee: AuditeeOut
-
-def today_iso():
-    return datetime.now(timezone.utc).date().isoformat()
 
 class AuditStartIn(BaseModel):
     auditee_id: int
@@ -84,8 +79,8 @@ class AnswerIn(BaseModel):
 class NonConformityIn(BaseModel):
     question_id: int
     description: str
-    severity: Literal["minor","major","critical"] = "major"
-    status: Literal["open","in_progress","closed"] = "open"
+    severity: Literal["minor", "major", "critical"] = "major"
+    status: Literal["open", "in_progress", "closed"] = "open"
     responsible_id: Optional[int] = None
     due_date: Optional[date] = None
     evidence_url: Optional[str] = None
@@ -107,7 +102,7 @@ class AuthCheckIn(BaseModel):
 
 class AuthCheckOut(BaseModel):
     ok: bool
-    reason: str | None = None
+    reason: Optional[str] = None
 
 # -------------------------------------------------
 # Models & helpers for Sales
@@ -118,7 +113,7 @@ class ObjectionOut(BaseModel):
     example_customer_argument: str
     recommended_response: str
     category: Optional[str] = None
-
+    
     class Config:
         orm_mode = True
 
@@ -128,7 +123,6 @@ class MatrixOut(BaseModel):
     demand_vs_moq: str
     inventory_vs_demand: str
     recommended_strategy: str
-
+    
     class Config:
         orm_mode = True
-
