@@ -50,10 +50,8 @@ def auth_check(payload: AuthCheckIn):
     try:
         conn = get_connection()
         cur = conn.cursor()
-
         # On ne révèle pas si le name existe : réponse générique
         GENERIC_FAIL = {"ok": False, "reason": "Invalid name or code"}
-
         # Lecture stricte par name
         cur.execute(
             """
