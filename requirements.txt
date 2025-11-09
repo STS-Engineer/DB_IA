@@ -4,6 +4,7 @@ hypercorn
 daphne
 requests
 psycopg2-binary
-fpdf   
-email-validator          
+fpdf
+email-validator
 python-multipart
+gunicorn
