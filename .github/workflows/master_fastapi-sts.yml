@@ -9,7 +9,6 @@ on:
       - ".github/workflows/**"
   workflow_dispatch:
 
-# 🔒 Empêche les runs parallèles pour cette app (évite 409 / conflits ARM)
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-fastapi-sts
   cancel-in-progress: true
@@ -41,7 +40,6 @@ jobs:
           pip install -r requirements.txt
           python -V
 
-      # 📦 Crée un ZIP propre (on exclut tout ce qui est inutile à l’exécution)
       - name: Create deployment zip
         run: |
           mkdir -p dist
@@ -68,37 +66,13 @@ jobs:
           name: python-app
           path: ./dist
 
-      # 🔐 Authentification Azure avec secrets
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          creds: ${{ secrets.AZURE_CREDENTIALS }}
-          # Format JSON dans ton secret :
-          # {
-          #   "clientId": "...",
-          #   "clientSecret": "...",
-          #   "subscriptionId": "...",
-          #   "tenantId": "..."
-          # }
-
-      # 🔐 Récupère les identifiants de publication Kudu
-      - name: Fetch publish credentials
-        id: pubcreds
-        run: |
-          set -e
-          CREDS_JSON=$(az webapp deployment list-publishing-credentials -g "${{ env.RESOURCE_GROUP }}" -n "${{ env.APP_NAME }}" -o json)
-          USER=$(echo "$CREDS_JSON" | jq -r '.publishingUserName')
-          PASS=$(echo "$CREDS_JSON" | jq -r '.publishingPassword')
-          echo "user=$USER" >> $GITHUB_OUTPUT
-          echo "pass=$PASS" >> $GITHUB_OUTPUT
-
-      # ⏳ Attente si un déploiement Kudu est actif (évite 409 / 429)
+      # ⏳ Attendre si un déploiement Kudu est encore en cours
       - name: Wait if another Kudu deployment is running
         shell: bash
         env:
           APP: ${{ env.APP_NAME }}
-          USER: ${{ steps.pubcreds.outputs.user }}
-          PASS: ${{ steps.pubcreds.outputs.pass }}
+          USER: ${{ secrets.PUBLISH_USER }}
+          PASS: ${{ secrets.PUBLISH_PASSWORD }}
         run: |
           set -e
           echo "Checking Kudu for active deployment..."
@@ -114,18 +88,20 @@ jobs:
             fi
           done
 
-      # 🚀 Déploiement avec retry/backoff exponentiel (réduit les appels ARM)
+      # 🚀 ZipDeploy direct avec retry/backoff
       - name: Zip deploy with retry/backoff
         shell: bash
         env:
-          RG: ${{ env.RESOURCE_GROUP }}
           APP: ${{ env.APP_NAME }}
+          USER: ${{ secrets.PUBLISH_USER }}
+          PASS: ${{ secrets.PUBLISH_PASSWORD }}
           ZIP: ${{ env.ZIP_PATH }}
         run: |
           set -e
-          echo "Starting ZipDeploy to $APP ..."
+          echo "Starting direct ZipDeploy to $APP ..."
           for i in 1 2 3 4 5; do
-            if az webapp deployment source config-zip -g "$RG" -n "$APP" --src "$ZIP"; then
+            if curl -s -u "$USER:$PASS" -X POST "https://$APP.scm.azurewebsites.net/api/zipdeploy" \
+              --data-binary @"$ZIP" -H "Content-Type: application/zip"; then
               echo "✅ Deployment succeeded"
               exit 0
             fi
