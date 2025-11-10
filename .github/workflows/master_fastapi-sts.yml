@@ -3,12 +3,21 @@ name: Build and deploy Python app to Azure Web App - fastapi-sts
 on:
   push:
     branches: [ master ]
+    paths:
+      - "app/**"
+      - "requirements.txt"
+      - ".github/workflows/**"
   workflow_dispatch:
 
-# 🔒 Ensure only one run per branch/app at a time (prevents 409)
+# 🔒 Empêche les runs parallèles pour cette app (évite 409 / conflits ARM)
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}-fastapi-sts
   cancel-in-progress: true
+
+env:
+  APP_NAME: fastapi-sts
+  RESOURCE_GROUP: Azure_Poitiers
+  ZIP_PATH: ./dist/app.zip
 
 jobs:
   build:
@@ -24,7 +33,6 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Optional: quick sanity build so we fail early if deps break
       - name: Create venv and install deps (sanity)
         run: |
           python -m venv antenv
@@ -32,39 +40,36 @@ jobs:
           pip install --upgrade pip
           pip install -r requirements.txt
           python -V
-          pip show uvicorn gunicorn || true
 
-      # 📦 Create a clean ZIP artifact (what we'll deploy)
+      # 📦 Crée un ZIP propre (on exclut tout ce qui est inutile à l’exécution)
       - name: Create deployment zip
         run: |
-          # Clean zip creation excluding unnecessary files
-          zip -r app.zip . \
+          mkdir -p dist
+          zip -r $ZIP_PATH . \
             -x "antenv/**" ".git/**" ".github/**" "**/__pycache__/**" "*.log" "test*" "*.tmp"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: python-app
-          path: app.zip
+          path: ${{ env.ZIP_PATH }}
           if-no-files-found: error
 
   deploy:
+    runs-on: ubuntu-latest
+    needs: build
     permissions:
       id-token: write
       contents: read
-      
-    runs-on: ubuntu-latest
-    needs: build
 
     steps:
-      - name: Download artifact from build job
+      - name: Download artifact
         uses: actions/download-artifact@v4
         with:
           name: python-app
           path: ./dist
 
-
-      - name: Login to Azure
+      - name: Login to Azure (OIDC)
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_857E67E32E864AC18EA2568BCE0562FB }}
@@ -72,22 +77,58 @@ jobs:
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_774E48575E42490782CA538A9D3CDCCA }}
           auth-type: OIDC
 
-      # 🚀 Deploy the ZIP via OneDeploy/ZipDeploy
-      - name: Deploy to Azure Web App
-        uses: azure/webapps-deploy@v3
-        with:
-          app-name: fastapi-sts
-          slot-name: Production
-          # Remove slot-name unless you're actually using a slot.
-          # If you are, set the real slot name (e.g., 'staging'), not 'Production'.
-          # slot-name: staging
-          package: ./dist/app.zip
-          target: SCM
-          verbose: true
-      - name: Wait for deployment to complete
+      # 🔐 Récupère les identifiants de publication (nécessaires pour appeler Kudu en basic auth)
+      - name: Fetch publish credentials (once)
+        id: pubcreds
         run: |
-          sleep 20
-          echo "Deployment should be complete"
+          set -e
+          CREDS_JSON=$(az webapp deployment list-publishing-credentials -g "${{ env.RESOURCE_GROUP }}" -n "${{ env.APP_NAME }}" -o json)
+          USER=$(echo "$CREDS_JSON" | jq -r '.publishingUserName')
+          PASS=$(echo "$CREDS_JSON" | jq -r '.publishingPassword')
+          echo "user=$USER" >> $GITHUB_OUTPUT
+          echo "pass=$PASS" >> $GITHUB_OUTPUT
 
+      # ⏳ Attendre si un déploiement Kudu est encore en cours (évite 409 → limite les retries → moins d’appels ARM)
+      - name: Wait if another Kudu deployment is running
+        shell: bash
+        env:
+          APP: ${{ env.APP_NAME }}
+          USER: ${{ steps.pubcreds.outputs.user }}
+          PASS: ${{ steps.pubcreds.outputs.pass }}
+        run: |
+          set -e
+          echo "Checking active Kudu deployments for $APP ..."
+          for i in {1..30}; do
+            # status: 3=running; 4=failed; 0/1/2=none/success/history
+            STATUS=$(curl -sf -u "$USER:$PASS" "https://$APP.scm.azurewebsites.net/api/deployments" \
+                     | jq -r '.[0].status // 0' || echo "0")
+            if [ "$STATUS" = "3" ]; then
+              echo "A deployment is running. Waiting 10s (try $i/30)..."
+              sleep 10
+            else
+              echo "No active deployment. Proceeding."
+              break
+            fi
+          done
 
-
+      # 🚀 ZipDeploy via CLI avec retry + backoff exponentiel (réduit l’échec et le bruit ARM)
+      - name: Zip deploy with retry/backoff
+        shell: bash
+        env:
+          RG: ${{ env.RESOURCE_GROUP }}
+          APP: ${{ env.APP_NAME }}
+          ZIP: ${{ env.ZIP_PATH }}
+        run: |
+          set -e
+          echo "Starting ZipDeploy to $APP ..."
+          for i in 1 2 3 4 5; do
+            if az webapp deployment source config-zip -g "$RG" -n "$APP" --src "$ZIP"; then
+              echo "✅ Deployment succeeded"
+              exit 0
+            fi
+            S=$((2**(i-1)))
+            echo "Deployment attempt $i failed. Retrying in ${S}s ..."
+            sleep $S
+          done
+          echo "❌ Deployment failed after retries"
+          exit 1
