@@ -59,7 +59,6 @@ jobs:
     runs-on: ubuntu-latest
     needs: build
     permissions:
-      id-token: write
       contents: read
 
     steps:
@@ -69,16 +68,21 @@ jobs:
           name: python-app
           path: ./dist
 
-      - name: Login to Azure (OIDC)
+      # 🔐 Authentification Azure avec secrets
+      - name: Login to Azure
         uses: azure/login@v2
         with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_857E67E32E864AC18EA2568BCE0562FB }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_8D6253A0805A4AE493AFB0DDD508C5C1 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_774E48575E42490782CA538A9D3CDCCA }}
-          auth-type: OIDC
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
+          # Format JSON dans ton secret :
+          # {
+          #   "clientId": "...",
+          #   "clientSecret": "...",
+          #   "subscriptionId": "...",
+          #   "tenantId": "..."
+          # }
 
-      # 🔐 Récupère les identifiants de publication (nécessaires pour appeler Kudu en basic auth)
-      - name: Fetch publish credentials (once)
+      # 🔐 Récupère les identifiants de publication Kudu
+      - name: Fetch publish credentials
         id: pubcreds
         run: |
           set -e
@@ -88,7 +92,7 @@ jobs:
           echo "user=$USER" >> $GITHUB_OUTPUT
           echo "pass=$PASS" >> $GITHUB_OUTPUT
 
-      # ⏳ Attendre si un déploiement Kudu est encore en cours (évite 409 → limite les retries → moins d’appels ARM)
+      # ⏳ Attente si un déploiement Kudu est actif (évite 409 / 429)
       - name: Wait if another Kudu deployment is running
         shell: bash
         env:
@@ -97,21 +101,20 @@ jobs:
           PASS: ${{ steps.pubcreds.outputs.pass }}
         run: |
           set -e
-          echo "Checking active Kudu deployments for $APP ..."
+          echo "Checking Kudu for active deployment..."
           for i in {1..30}; do
-            # status: 3=running; 4=failed; 0/1/2=none/success/history
             STATUS=$(curl -sf -u "$USER:$PASS" "https://$APP.scm.azurewebsites.net/api/deployments" \
                      | jq -r '.[0].status // 0' || echo "0")
             if [ "$STATUS" = "3" ]; then
-              echo "A deployment is running. Waiting 10s (try $i/30)..."
+              echo "Deployment in progress. Waiting 10s (try $i/30)..."
               sleep 10
             else
-              echo "No active deployment. Proceeding."
+              echo "No deployment active. Proceeding."
               break
             fi
           done
 
-      # 🚀 ZipDeploy via CLI avec retry + backoff exponentiel (réduit l’échec et le bruit ARM)
+      # 🚀 Déploiement avec retry/backoff exponentiel (réduit les appels ARM)
       - name: Zip deploy with retry/backoff
         shell: bash
         env:
